@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { formatDistanceToNowStrict, differenceInSeconds } from "date-fns";
-import { Box, Clock, CheckCircle2, AlertCircle, Loader2, X, ChevronRight, Plus, Minus, RefreshCw, BarChart3, PackageCheck, Layers, Activity } from "lucide-react";
+import { Crosshair, Clock, CheckCircle2, AlertOctagon, Loader2, X, ChevronRight, Plus, Minus, RefreshCw, Activity, Cpu, ShieldAlert, Fingerprint } from "lucide-react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 
 type Product = {
@@ -35,13 +35,22 @@ const staggerContainer: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: { staggerChildren: 0.05 }
+    transition: { staggerChildren: 0.1, delayChildren: 0.2 }
   }
 };
 
 const itemVariant: Variants = {
-  hidden: { opacity: 0, y: 15 },
-  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 400, damping: 30 } }
+  hidden: { opacity: 0, scale: 0.95, y: 30, filter: "blur(10px)" },
+  show: { opacity: 1, scale: 1, y: 0, filter: "blur(0px)", transition: { type: "spring", stiffness: 300, damping: 24 } }
+};
+
+const glitchVariant: Variants = {
+  hidden: { opacity: 0, x: -20 },
+  show: { 
+    opacity: 1, 
+    x: 0, 
+    transition: { type: "spring", stiffness: 400, damping: 20 } 
+  }
 };
 
 export default function Store() {
@@ -70,7 +79,7 @@ export default function Store() {
         setProducts(await res.json());
       }
     } catch {
-      if (!silent) showMessage("Network error fetching inventory", true);
+      if (!silent) showMessage("SYSTEM_ERROR: Telemetry disconnected.", true);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -87,7 +96,6 @@ export default function Store() {
   useEffect(() => {
     if (!reservation) return;
     
-    // Total reservation time is 10 minutes (600 seconds)
     const TOTAL_SECONDS = 600;
     
     const interval = setInterval(() => {
@@ -95,7 +103,7 @@ export default function Store() {
       const now = new Date();
       
       if (expiry <= now) {
-        setTimeLeft("Expired");
+        setTimeLeft("EXPIRED");
         setTimerPercent(0);
         clearInterval(interval);
       } else {
@@ -109,7 +117,7 @@ export default function Store() {
 
   const handleReserve = async (inventoryId: string, maxStock: number) => {
     const quantity = quantities[inventoryId] || 1;
-    if (quantity > maxStock) return showMessage(`Only ${maxStock} available`, true);
+    if (quantity > maxStock) return showMessage(`OVERRIDE_DENIED: Max limit ${maxStock}`, true);
     
     setProcessing(true);
     try {
@@ -121,14 +129,14 @@ export default function Store() {
 
       const data = await res.json();
       if (!res.ok) {
-        showMessage(data.error || "Failed to reserve", true);
+        showMessage(data.error || "LOCK_FAILURE", true);
         fetchProducts(true);
       } else {
         setReservation(data.reservation);
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch {
-      showMessage("Network error during reservation", true);
+      showMessage("NETWORK_ANOMALY DETECTED", true);
     } finally {
       setProcessing(false);
     }
@@ -144,15 +152,15 @@ export default function Store() {
       });
       const data = await res.json();
       if (!res.ok) {
-        showMessage(data.error || "Failed to confirm", true);
+        showMessage(data.error || "CONFIRM_FAILED", true);
         if (res.status === 410) setReservation(null);
       } else {
-        showMessage("Order confirmed successfully.", false);
+        showMessage("TRANSACTION SECURED.", false);
         setReservation(null);
       }
       fetchProducts(true);
     } catch {
-      showMessage("Network error during confirmation", true);
+      showMessage("UPLINK ERROR", true);
     } finally {
       setProcessing(false);
     }
@@ -166,11 +174,11 @@ export default function Store() {
         method: "POST",
         headers: { "Idempotency-Key": crypto.randomUUID() },
       });
-      showMessage("Reservation released.", false);
+      showMessage("LOCK ABORTED.", false);
       setReservation(null);
       fetchProducts(true);
     } catch {
-      showMessage("Network error releasing reservation", true);
+      showMessage("RELEASE FAILED", true);
     } finally {
       setProcessing(false);
     }
@@ -184,7 +192,6 @@ export default function Store() {
     });
   };
 
-  // Analytics Calculations
   const stats = useMemo(() => {
     let globalStock = 0;
     let globalReserved = 0;
@@ -210,143 +217,146 @@ export default function Store() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-50">
-        <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+      <div className="flex items-center justify-center min-h-screen bg-black">
+        <div className="relative">
+          <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: "linear" }} className="absolute inset-0 rounded-full border-t-2 border-cyan-500 w-16 h-16 opacity-50"></motion.div>
+          <motion.div animate={{ rotate: -360 }} transition={{ repeat: Infinity, duration: 1.5, ease: "linear" }} className="rounded-full border-r-2 border-blue-500 w-16 h-16"></motion.div>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Fingerprint className="w-6 h-6 text-cyan-400 animate-pulse" />
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-[1400px] mx-auto p-4 md:p-8 pt-8 md:pt-12 pb-32">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
+    <div className="max-w-[1600px] mx-auto p-4 md:p-8 pt-8 md:pt-12 pb-32">
+      {/* HUD Header */}
+      <motion.div 
+        initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}
+        className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4 border-b border-cyan-900/50 pb-6 relative"
+      >
+        <div className="absolute bottom-0 left-0 w-32 h-[1px] bg-gradient-to-r from-cyan-400 to-transparent" />
+        
         <div>
-          <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900 flex items-center gap-3">
-            <Box className="w-8 h-8 text-indigo-600" strokeWidth={2.5} />
-            StockPulse
+          <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-blue-400 to-indigo-400 flex items-center gap-4 uppercase font-mono">
+            <Crosshair className="w-10 h-10 text-cyan-400 animate-[spin_10s_linear_infinite]" strokeWidth={1.5} />
+            StockPulse_OS
           </h1>
-          <p className="text-slate-500 mt-2 font-medium tracking-tight">Real-Time Inventory Reservation Platform</p>
+          <div className="flex items-center gap-3 mt-3">
+            <div className="w-2 h-2 bg-cyan-500 rounded-full animate-pulse shadow-[0_0_8px_#06b6d4]" />
+            <p className="text-cyan-600/80 font-mono text-sm tracking-widest uppercase">System Online // Sync Protocol Active</p>
+          </div>
         </div>
         
         <button 
           onClick={() => { setIsRefreshing(true); fetchProducts(false); }}
           disabled={isRefreshing}
-          className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm"
+          className="flex items-center gap-3 bg-black/50 hover:bg-cyan-950/30 text-cyan-400 border border-cyan-800/50 hover:border-cyan-500/50 px-6 py-3 rounded-none font-mono text-xs tracking-widest uppercase transition-all shadow-[inset_0_0_20px_rgba(6,182,212,0.05)] hover:shadow-[inset_0_0_20px_rgba(6,182,212,0.2),0_0_15px_rgba(6,182,212,0.2)] group"
         >
-          <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin text-indigo-600" : ""}`} />
-          Sync Data
+          <RefreshCw className={`w-4 h-4 group-hover:text-cyan-300 ${isRefreshing ? "animate-spin text-cyan-300" : ""}`} />
+          [ MANUAL OVERRIDE ]
         </button>
-      </div>
+      </motion.div>
 
-      {/* Analytics Dashboard */}
+      {/* Cyber HUD Stats Panel */}
       {!reservation && (
         <motion.div 
           variants={staggerContainer} initial="hidden" animate="show"
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-12"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16"
         >
-          <motion.div variants={itemVariant} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-slate-500 text-sm font-medium">Total Products</span>
-              <PackageCheck className="w-5 h-5 text-indigo-500" />
-            </div>
-            <div className="text-3xl font-semibold text-slate-900">{stats.productCount}</div>
-          </motion.div>
-          
-          <motion.div variants={itemVariant} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-slate-500 text-sm font-medium">Active Warehouses</span>
-              <Layers className="w-5 h-5 text-indigo-500" />
-            </div>
-            <div className="text-3xl font-semibold text-slate-900">{stats.warehouseCount}</div>
-          </motion.div>
-          
-          <motion.div variants={itemVariant} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-slate-500 text-sm font-medium">Global Stock</span>
-              <Box className="w-5 h-5 text-indigo-500" />
-            </div>
-            <div className="text-3xl font-semibold text-slate-900">{stats.globalStock}</div>
-          </motion.div>
-          
-          <motion.div variants={itemVariant} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-slate-500 text-sm font-medium">Inventory Utilization</span>
-              <Activity className="w-5 h-5 text-indigo-500" />
-            </div>
-            <div className="flex items-end gap-3">
-              <div className="text-3xl font-semibold text-slate-900">{stats.utilization}%</div>
-              <div className="flex-1 mb-2 h-2 bg-slate-100 rounded-full overflow-hidden">
-                <motion.div 
-                  initial={{ width: 0 }} animate={{ width: `${stats.utilization}%` }} transition={{ duration: 1, ease: "easeOut" }}
-                  className="h-full bg-indigo-500 rounded-full"
-                />
+          {[
+            { label: "ASSET COUNT", value: stats.productCount, icon: Cpu, color: "text-cyan-400" },
+            { label: "FACILITIES", value: stats.warehouseCount, icon: Activity, color: "text-blue-400" },
+            { label: "GLOBAL RESERVE", value: stats.globalStock, icon: ShieldAlert, color: "text-indigo-400" },
+            { label: "SYS LOAD", value: `${stats.utilization}%`, icon: Fingerprint, color: "text-amber-400" }
+          ].map((stat, i) => (
+            <motion.div key={i} variants={glitchVariant} className="relative group">
+              {/* Corner Accents */}
+              <div className="absolute top-0 left-0 w-2 h-2 border-t-2 border-l-2 border-cyan-500/50" />
+              <div className="absolute top-0 right-0 w-2 h-2 border-t-2 border-r-2 border-cyan-500/50" />
+              <div className="absolute bottom-0 left-0 w-2 h-2 border-b-2 border-l-2 border-cyan-500/50" />
+              <div className="absolute bottom-0 right-0 w-2 h-2 border-b-2 border-r-2 border-cyan-500/50" />
+              
+              <div className="bg-black/40 backdrop-blur-md p-6 border border-cyan-900/30 flex flex-col justify-between h-full group-hover:bg-cyan-950/20 group-hover:border-cyan-500/30 transition-all duration-500">
+                <div className="flex justify-between items-center mb-6">
+                  <span className="text-cyan-700 font-mono text-xs tracking-widest">{stat.label}</span>
+                  <stat.icon className={`w-5 h-5 ${stat.color} opacity-70 group-hover:opacity-100 group-hover:animate-pulse`} />
+                </div>
+                <div className="text-4xl font-black text-white font-mono tracking-tighter">{stat.value}</div>
               </div>
-            </div>
-          </motion.div>
+            </motion.div>
+          ))}
         </motion.div>
       )}
 
-      {/* Main Content Area */}
+      {/* Main Holographic Array */}
       <AnimatePresence mode="wait">
         {reservation ? (
           <motion.div
             key="checkout"
-            initial={{ opacity: 0, scale: 0.98, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.98, y: -10 }}
-            transition={{ type: "spring", stiffness: 400, damping: 30 }}
-            className="w-full max-w-xl mx-auto"
+            initial={{ opacity: 0, scale: 0.9, filter: "brightness(2) blur(10px)" }}
+            animate={{ opacity: 1, scale: 1, filter: "brightness(1) blur(0px)" }}
+            exit={{ opacity: 0, scale: 0.9, filter: "brightness(0) blur(10px)" }}
+            transition={{ duration: 0.5, ease: "circOut" }}
+            className="w-full max-w-3xl mx-auto relative group"
           >
-            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
-              {/* Progress Bar Header */}
-              <div className="h-1.5 w-full bg-slate-100">
+            {/* Holographic glowing aura */}
+            <div className="absolute -inset-2 bg-gradient-to-r from-cyan-500 via-indigo-500 to-amber-500 rounded-none blur-2xl opacity-20 animate-pulse"></div>
+            
+            <div className="relative bg-black/80 backdrop-blur-2xl border border-cyan-500/40 shadow-[0_0_50px_rgba(6,182,212,0.15)]">
+              {/* Top Tech Border */}
+              <div className="h-1 w-full bg-cyan-950">
                 <motion.div 
-                  className={`h-full ${timerPercent < 20 ? 'bg-red-500' : 'bg-indigo-500'}`}
+                  className={`h-full shadow-[0_0_10px_currentColor] ${timerPercent < 20 ? 'bg-amber-500 text-amber-500' : 'bg-cyan-400 text-cyan-400'}`}
                   initial={{ width: '100%' }}
                   animate={{ width: `${timerPercent}%` }}
                   transition={{ ease: "linear", duration: 1 }}
                 />
               </div>
 
-              <div className="p-8">
-                <div className="flex justify-between items-start mb-8">
+              <div className="p-8 md:p-10 border-t border-b border-cyan-900/50">
+                <div className="flex justify-between items-start mb-10">
                   <div>
-                    <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Complete Order</h2>
-                    <p className="text-slate-500 mt-1">Inventory is locked.</p>
+                    <h2 className="text-2xl font-black text-white tracking-widest uppercase flex items-center gap-3 font-mono">
+                      <ShieldAlert className="w-6 h-6 text-amber-400" />
+                      Lock Established
+                    </h2>
+                    <p className="text-cyan-600/80 mt-2 font-mono text-sm uppercase tracking-widest">Awaiting final authorization sequence.</p>
                   </div>
-                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm border ${timeLeft === "Expired" ? "bg-red-50 text-red-600 border-red-100" : "bg-slate-50 text-slate-700 border-slate-200"}`}>
+                  <div className={`flex items-center gap-2 px-4 py-2 bg-black border font-mono text-sm shadow-[0_0_15px_inset_currentColor] ${timeLeft === "EXPIRED" ? "text-red-500 border-red-500/50" : "text-cyan-400 border-cyan-500/50"}`}>
                     <Clock className="w-4 h-4" />
                     {timeLeft}
                   </div>
                 </div>
                 
-                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 mb-8 flex items-center justify-between">
-                   <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-white rounded-xl shadow-sm border border-slate-200 flex items-center justify-center">
-                         <PackageCheck className="w-6 h-6 text-indigo-600" />
+                <div className="bg-cyan-950/20 border border-cyan-800/40 p-6 mb-10 flex items-center justify-between">
+                   <div className="flex items-center gap-5">
+                      <div className="w-14 h-14 bg-black border border-cyan-500/50 shadow-[0_0_15px_rgba(6,182,212,0.3)] flex items-center justify-center">
+                         <Fingerprint className="w-7 h-7 text-cyan-400" />
                       </div>
                       <div>
-                        <div className="text-slate-900 font-semibold">Reserved Units</div>
-                        <div className="text-slate-500 text-sm">Valid for {timeLeft}</div>
+                        <div className="text-cyan-100 font-mono text-lg uppercase tracking-wider">Asset Secured</div>
+                        <div className="text-cyan-600/80 font-mono text-xs uppercase tracking-widest mt-1">TTL: {timeLeft}</div>
                       </div>
                    </div>
-                   <div className="text-2xl font-semibold text-slate-900">{reservation.quantity}x</div>
+                   <div className="text-3xl font-black text-cyan-300 font-mono">QTY: {reservation.quantity}</div>
                 </div>
                 
-                <div className="flex flex-col sm:flex-row gap-3">
+                <div className="flex flex-col sm:flex-row gap-4">
                   <button
                     onClick={handleConfirm}
-                    disabled={processing || timeLeft === "Expired"}
-                    className="flex-1 bg-indigo-600 text-white font-semibold py-3.5 rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center shadow-sm"
+                    disabled={processing || timeLeft === "EXPIRED"}
+                    className="flex-1 bg-cyan-500 hover:bg-cyan-400 text-black font-black uppercase tracking-widest py-4 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center shadow-[0_0_20px_rgba(6,182,212,0.4)] hover:shadow-[0_0_30px_rgba(6,182,212,0.6)] font-mono"
                   >
-                    {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Confirm Order"}
+                    {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "[ AUTHORIZE ]"}
                   </button>
                   <button
                     onClick={handleRelease}
                     disabled={processing}
-                    className="bg-white text-slate-600 border border-slate-200 font-semibold py-3.5 px-6 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50 flex justify-center items-center"
+                    className="bg-black text-cyan-500 border border-cyan-500/30 font-black uppercase tracking-widest py-4 px-8 hover:bg-cyan-950/50 hover:border-cyan-400 transition-all disabled:opacity-50 flex justify-center items-center font-mono hover:shadow-[0_0_15px_rgba(6,182,212,0.2)]"
                   >
-                    {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Release"}
+                    {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "[ ABORT ]"}
                   </button>
                 </div>
               </div>
@@ -359,79 +369,86 @@ export default function Store() {
             initial="hidden"
             animate="show"
             exit={{ opacity: 0 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
           >
             {products.map((product) => (
               <motion.div 
                 variants={itemVariant}
                 key={product.id} 
-                className="bg-white rounded-2xl flex flex-col border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden"
+                className="group relative bg-black/40 backdrop-blur-md flex flex-col border border-cyan-900/30 hover:border-cyan-500/50 transition-all duration-500 overflow-hidden shadow-[0_0_0_rgba(6,182,212,0)] hover:shadow-[0_0_30px_rgba(6,182,212,0.15)]"
               >
-                <div className="p-6 border-b border-slate-100 flex gap-5">
-                  <div className="w-20 h-20 rounded-xl bg-slate-50 border border-slate-100 overflow-hidden flex-shrink-0">
+                {/* Tech Corners */}
+                <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-cyan-500/0 group-hover:border-cyan-400 transition-all duration-300 z-20" />
+                <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-cyan-500/0 group-hover:border-cyan-400 transition-all duration-300 z-20" />
+
+                <div className="p-6 border-b border-cyan-900/30 flex gap-5 relative">
+                  <div className="w-24 h-24 bg-black border border-cyan-800/50 overflow-hidden flex-shrink-0 relative">
+                    <div className="absolute inset-0 bg-cyan-500/10 mix-blend-overlay z-10 group-hover:bg-transparent transition-colors"></div>
                     {product.image && (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={product.image} alt={product.name} className="object-cover w-full h-full" />
+                      <img src={product.image} alt={product.name} className="object-cover w-full h-full grayscale group-hover:grayscale-0 transition-all duration-700 opacity-80 group-hover:opacity-100 scale-100 group-hover:scale-110" />
                     )}
                   </div>
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-900 tracking-tight leading-tight mb-1">{product.name}</h3>
-                    <p className="text-slate-500 text-sm line-clamp-2 leading-relaxed">{product.description}</p>
+                    <h3 className="text-xl font-black text-white tracking-widest uppercase font-mono mb-2 group-hover:text-cyan-300 transition-colors">{product.name}</h3>
+                    <p className="text-cyan-600/70 text-xs font-mono line-clamp-3 leading-relaxed uppercase tracking-wider">{product.description}</p>
                   </div>
                 </div>
                 
-                <div className="p-6 bg-slate-50/50 flex-1 flex flex-col gap-4">
+                <div className="p-6 bg-cyan-950/10 flex-1 flex flex-col gap-5">
                   {product.inventories.map((inv) => {
                     const isAvailable = inv.availableStock > 0;
                     const isLowStock = isAvailable && inv.availableStock <= 5;
                     const selectedQty = quantities[inv.id] || 1;
 
                     return (
-                      <div key={inv.id} className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                        <div className="flex justify-between items-start mb-4">
+                      <div key={inv.id} className="relative bg-black/60 p-5 border border-cyan-900/40 group/inv overflow-hidden hover:border-cyan-500/40 transition-colors">
+                        {/* Scanline effect */}
+                        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-cyan-500/5 to-transparent -translate-y-full group-hover/inv:animate-[scan_2s_linear_infinite]" />
+
+                        <div className="flex justify-between items-start mb-5 relative z-10">
                           <div>
-                            <div className="text-sm font-semibold text-slate-900">{inv.warehouse.name}</div>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              {/* Smart Badge */}
-                              <div className={`w-2 h-2 rounded-full ${!isAvailable ? "bg-slate-300" : isLowStock ? "bg-amber-500 animate-pulse" : "bg-emerald-500"}`} />
-                              <span className={`text-xs font-medium ${!isAvailable ? "text-slate-500" : isLowStock ? "text-amber-600" : "text-emerald-600"}`}>
-                                {!isAvailable ? "Out of Stock" : isLowStock ? `${inv.availableStock} Left - Expiring Soon` : `${inv.availableStock} Available`}
+                            <div className="text-xs font-black text-cyan-50 uppercase tracking-widest font-mono">{inv.warehouse.name}</div>
+                            <div className="flex items-center gap-2 mt-2">
+                              <div className={`w-1.5 h-1.5 shadow-[0_0_8px_currentColor] ${!isAvailable ? "bg-slate-600 text-slate-600" : isLowStock ? "bg-amber-400 text-amber-400 animate-pulse" : "bg-cyan-400 text-cyan-400"}`} />
+                              <span className={`text-[10px] font-black uppercase tracking-widest font-mono ${!isAvailable ? "text-slate-500" : isLowStock ? "text-amber-400" : "text-cyan-400"}`}>
+                                {!isAvailable ? "DEPLETED" : isLowStock ? `CRITICAL: ${inv.availableStock} REMAINING` : `OPTIMAL: ${inv.availableStock} UNITS`}
                               </span>
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg">
+                        <div className="flex items-center gap-4 relative z-10">
+                          <div className="flex items-center bg-black border border-cyan-800/50">
                             <button 
                               onClick={() => updateQuantity(inv.id, -1, inv.availableStock)}
                               disabled={!isAvailable || selectedQty <= 1 || processing}
-                              className="p-2.5 text-slate-500 hover:text-slate-900 disabled:opacity-30 transition-colors"
+                              className="p-3 text-cyan-600 hover:text-cyan-300 hover:bg-cyan-900/30 disabled:opacity-30 transition-colors"
                             >
-                              <Minus className="w-3.5 h-3.5" />
+                              <Minus className="w-3 h-3" />
                             </button>
-                            <div className="w-8 text-center text-sm font-semibold text-slate-900">
+                            <div className="w-10 text-center text-sm font-black text-white font-mono">
                               {isAvailable ? selectedQty : 0}
                             </div>
                             <button 
                               onClick={() => updateQuantity(inv.id, 1, inv.availableStock)}
                               disabled={!isAvailable || selectedQty >= inv.availableStock || processing}
-                              className="p-2.5 text-slate-500 hover:text-slate-900 disabled:opacity-30 transition-colors"
+                              className="p-3 text-cyan-600 hover:text-cyan-300 hover:bg-cyan-900/30 disabled:opacity-30 transition-colors"
                             >
-                              <Plus className="w-3.5 h-3.5" />
+                              <Plus className="w-3 h-3" />
                             </button>
                           </div>
 
                           <button
                             onClick={() => handleReserve(inv.id, inv.availableStock)}
                             disabled={!isAvailable || processing}
-                            className={`flex-1 flex items-center justify-center gap-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                            className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-black uppercase tracking-widest transition-all font-mono ${
                               isAvailable 
-                                ? "bg-slate-900 text-white hover:bg-slate-800 shadow-sm" 
-                                : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                                ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/50 hover:bg-cyan-400 hover:text-black hover:shadow-[0_0_20px_rgba(6,182,212,0.5)]" 
+                                : "bg-black text-slate-600 border border-slate-800 cursor-not-allowed"
                             }`}
                           >
-                            Reserve
+                            [ {isAvailable ? "INITIALIZE" : "LOCKED"} ]
                             {isAvailable && <ChevronRight className="w-4 h-4" />}
                           </button>
                         </div>
@@ -445,24 +462,29 @@ export default function Store() {
         )}
       </AnimatePresence>
 
-      {/* Minimal Toast Notification */}
+      {/* Cyberpunk Terminal Toast */}
       <AnimatePresence>
         {toast && (
           <motion.div
             key={toast.id}
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
-            className="fixed bottom-6 right-6 p-4 rounded-xl shadow-lg border bg-white flex items-center gap-3 max-w-sm z-50"
-            style={{ borderColor: toast.isError ? '#fecaca' : '#bbf7d0' }}
+            initial={{ opacity: 0, x: 50, filter: "brightness(2)" }}
+            animate={{ opacity: 1, x: 0, filter: "brightness(1)" }}
+            exit={{ opacity: 0, x: 50, filter: "brightness(0)" }}
+            className="fixed bottom-8 right-8 p-5 border bg-black/90 backdrop-blur-xl flex items-start gap-4 max-w-md z-50 shadow-[0_0_30px_rgba(0,0,0,0.5)]"
+            style={{ borderColor: toast.isError ? 'rgba(239, 68, 68, 0.5)' : 'rgba(6, 182, 212, 0.5)' }}
           >
             {toast.isError ? (
-              <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
+              <AlertOctagon className="w-6 h-6 text-red-500 shrink-0 mt-0.5 animate-pulse" />
             ) : (
-              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
+              <CheckCircle2 className="w-6 h-6 text-cyan-400 shrink-0 mt-0.5" />
             )}
-            <p className="font-medium text-sm text-slate-700">{toast.msg}</p>
-            <button onClick={() => setToast(null)} className="ml-auto text-slate-400 hover:text-slate-600 transition">
+            <div>
+              <p className={`font-mono text-xs tracking-widest uppercase mb-1 ${toast.isError ? "text-red-400" : "text-cyan-500"}`}>
+                {toast.isError ? "SYSTEM_ALERT" : "OPERATION_SUCCESS"}
+              </p>
+              <p className="font-mono text-sm text-white tracking-wider">{toast.msg}</p>
+            </div>
+            <button onClick={() => setToast(null)} className="ml-auto text-cyan-700 hover:text-cyan-400 transition mt-0.5">
               <X className="w-4 h-4" />
             </button>
           </motion.div>
