@@ -103,3 +103,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+export async function GET() {
+  try {
+    const reservations = await prisma.reservation.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        inventory: {
+          include: {
+            product: true,
+            warehouse: true,
+          },
+        },
+      },
+    });
+
+    const formatted = reservations.map(res => ({
+      id: res.id,
+      inventoryId: res.inventoryId,
+      quantity: res.quantity,
+      status: res.status,
+      expiresAt: res.expiresAt,
+      createdAt: res.createdAt,
+      productName: res.inventory.product.name,
+      warehouseName: res.inventory.warehouse.name,
+      image: res.inventory.product.image,
+    }));
+
+    return NextResponse.json(formatted);
+  } catch (error) {
+    console.error("Error fetching reservations:", error);
+    return NextResponse.json({ error: "Failed to fetch reservations" }, { status: 500 });
+  }
+}
