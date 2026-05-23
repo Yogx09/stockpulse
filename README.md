@@ -14,10 +14,11 @@ Stockpulse is an inventory and order-fulfillment platform that handles high-conc
 
 ## Standout UX & Platform Features
 To provide a premium and highly functional user experience, I built out several "extra" features:
-- **Dynamic Quantity Selection**: Users can choose exactly how many units they want to reserve (1 to N) using custom selectors, bounded by the maximum available stock. The backend handles multi-unit reservations natively.
-- **"+5m Extend Time" Bonus**: Users in checkout can extend their reservation time by 5 minutes. This is backed by a custom `/api/reservations/:id/extend` endpoint with idempotent state management.
-- **"Low Stock" Urgency Pulse**: A dynamic visual indicator highlighting items with 5 or fewer units available. It includes a red pulse animation to drive urgency and conversion natively on the listing page.
-- **Framer Motion Animations**: The application uses staggered layout animations and buttery-smooth glassmorphic modals to feel like a high-end consumer app.
+- **Vibrant Category Storefront**: The UI was completely redesigned into a bright, colorful, modern e-commerce storefront.
+- **Live Search & Category Filters**: Users can instantly filter products by Category (e.g. Smartphones, Gaming, Laptops) or use the live text search input to find exactly what they want.
+- **Dynamic Quantity Selection**: Users can choose exactly how many units they want to reserve (1 to N) using custom selectors, bounded by the maximum available stock. 
+- **"+5m Extend Time" Bonus**: Users in checkout can extend their reservation time by 5 minutes natively via a custom `/api/reservations/:id/extend` endpoint.
+- **"Low Stock" Urgency Pulse**: A dynamic visual indicator highlighting items with 5 or fewer units available. It includes a pulsing animation to drive urgency.
 
 ## Getting Started Locally
 

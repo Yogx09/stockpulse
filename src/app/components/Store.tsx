@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Package, Clock, CheckCircle2, AlertTriangle, Loader2, Sparkles, X, ChevronRight, Plus, Minus, Timer, RefreshCw } from "lucide-react";
+import { ShoppingBag, Clock, CheckCircle2, AlertTriangle, Loader2, Sparkles, X, ChevronRight, Plus, Minus, Timer, RefreshCw, Search, Tag } from "lucide-react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 
 type Product = {
@@ -31,11 +31,23 @@ type Reservation = {
   expiresAt: string;
 };
 
+// Hardcoded categories mapped from product names to avoid DB schema changes on the fly
+const CATEGORY_MAP: Record<string, string> = {
+  "iPhone 15 Pro": "Smartphones",
+  "PlayStation 5 Pro": "Gaming",
+  "MacBook Pro M4": "Laptops",
+  "DJI Mini 4 Pro": "Drones",
+  "Sony Alpha a7 IV": "Photography",
+  "Logitech MX Master 3S": "Accessories"
+};
+
+const CATEGORIES = ["All", "Smartphones", "Gaming", "Laptops", "Drones", "Photography", "Accessories"];
+
 const staggerContainer: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: { staggerChildren: 0.1 }
+    transition: { staggerChildren: 0.08 }
   }
 };
 
@@ -53,11 +65,13 @@ export default function Store() {
   const [timeLeft, setTimeLeft] = useState<string>("");
   const [processing, setProcessing] = useState(false);
   
-  // Custom quantities map by inventory ID
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [extended, setExtended] = useState(false);
-
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // New vibrant features: Search and Categories
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeCategory, setActiveCategory] = useState("All");
 
   const showMessage = (msg: string, isError: boolean) => {
     setToast({ msg, isError, id: Date.now() });
@@ -83,7 +97,6 @@ export default function Store() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProducts();
     
-    // Auto-polling for live stock updates every 5 seconds
     const pollInterval = setInterval(() => {
       fetchProducts(true);
     }, 5000);
@@ -126,7 +139,7 @@ export default function Store() {
       const data = await res.json();
       if (!res.ok) {
         showMessage(data.error || "Failed to reserve", true);
-        fetchProducts();
+        fetchProducts(true);
       } else {
         setReservation(data.reservation);
         setExtended(false);
@@ -157,7 +170,7 @@ export default function Store() {
         showMessage("Purchase confirmed successfully!", false);
         setReservation(null);
       }
-      fetchProducts();
+      fetchProducts(true);
     } catch {
       showMessage("Network error during confirmation", true);
     } finally {
@@ -175,7 +188,7 @@ export default function Store() {
       });
       showMessage("Reservation cancelled", false);
       setReservation(null);
-      fetchProducts();
+      fetchProducts(true);
     } catch {
       showMessage("Network error during cancellation", true);
     } finally {
@@ -214,42 +227,90 @@ export default function Store() {
     });
   };
 
+  const filteredProducts = useMemo(() => {
+    return products.filter(p => {
+      const category = CATEGORY_MAP[p.name] || "Uncategorized";
+      const matchesCategory = activeCategory === "All" || category === activeCategory;
+      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            p.description.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesCategory && matchesSearch;
+    });
+  }, [products, activeCategory, searchQuery]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-          <Loader2 className="w-10 h-10 text-indigo-500" />
+          <Loader2 className="w-12 h-12 text-pink-500" />
         </motion.div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-4 md:p-8 pt-12 md:pt-20 pb-32">
+    <div className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-16 pb-32">
       <motion.div 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: "easeOut" }}
-        className="flex flex-col md:flex-row justify-between items-start md:items-center mb-16 gap-4"
+        className="mb-12"
       >
-        <div>
-          <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white flex items-center gap-3">
-            <Package className="w-10 h-10 text-indigo-500" />
-            Stockpulse
-            <Sparkles className="w-6 h-6 text-indigo-400 opacity-80" />
-          </h1>
-          <p className="text-zinc-400 mt-2 text-lg">High-concurrency reservation engine with live tracking.</p>
+        <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-white p-6 md:p-8 rounded-3xl shadow-xl shadow-pink-100/50 border border-slate-100 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-pink-400 to-orange-400 rounded-full blur-3xl opacity-10 -mr-20 -mt-20"></div>
+          
+          <div className="flex-1 relative z-10 w-full text-center md:text-left">
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900 flex items-center justify-center md:justify-start gap-3">
+              <ShoppingBag className="w-10 h-10 text-pink-500" />
+              Pulse<span className="text-pink-500">Shop</span>
+            </h1>
+            <p className="text-slate-500 mt-2 font-medium">Discover vibrant tech and gears.</p>
+          </div>
+
+          {!reservation && (
+            <div className="flex-1 w-full relative z-10">
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <Search className="h-5 w-5 text-slate-400 group-focus-within:text-pink-500 transition-colors" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="block w-full pl-11 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent transition-all shadow-inner"
+                />
+              </div>
+            </div>
+          )}
+          
+          {!reservation && (
+            <button 
+              onClick={() => { setIsRefreshing(true); fetchProducts(false); }}
+              disabled={isRefreshing}
+              className="hidden md:flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-5 py-3.5 rounded-2xl font-bold transition-all shadow-sm hover:shadow-md active:scale-95 whitespace-nowrap z-10"
+            >
+              <RefreshCw className={`w-5 h-5 ${isRefreshing ? "animate-spin text-pink-500" : ""}`} />
+              Sync
+            </button>
+          )}
         </div>
-        
+
         {!reservation && (
-          <button 
-            onClick={() => { setIsRefreshing(true); fetchProducts(false); }}
-            disabled={isRefreshing}
-            className="flex items-center gap-2 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 px-4 py-2.5 rounded-xl font-medium transition-all"
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin text-indigo-400" : ""}`} />
-            Live Sync
-          </button>
+          <div className="mt-8 flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
+            {CATEGORIES.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={`px-5 py-2.5 rounded-full font-bold text-sm whitespace-nowrap transition-all duration-300 ${
+                  activeCategory === cat 
+                    ? "bg-slate-900 text-white shadow-lg shadow-slate-900/20 scale-105" 
+                    : "bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         )}
       </motion.div>
 
@@ -263,31 +324,35 @@ export default function Store() {
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
             className="w-full max-w-2xl mx-auto relative group"
           >
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
-            <div className="relative bg-zinc-900/90 backdrop-blur-xl border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl">
-              <div className="bg-zinc-900/50 border-b border-zinc-800 px-8 py-5 flex items-center justify-between">
-                <h2 className="text-xl font-bold text-white">Checkout</h2>
-                <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full font-bold text-sm ${timeLeft === "Expired" ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.2)]"}`}>
+            <div className="absolute -inset-1 bg-gradient-to-r from-pink-500 via-orange-400 to-pink-500 rounded-3xl blur opacity-30 group-hover:opacity-50 transition duration-1000 group-hover:duration-200 animate-gradient-xy"></div>
+            <div className="relative bg-white/90 backdrop-blur-2xl border border-white rounded-3xl overflow-hidden shadow-2xl">
+              <div className="bg-slate-50 border-b border-slate-100 px-8 py-6 flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-slate-900">Secure Checkout</h2>
+                <div className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold text-sm shadow-sm ${timeLeft === "Expired" ? "bg-red-50 text-red-600 border border-red-100" : "bg-pink-50 text-pink-600 border border-pink-100 shadow-[0_0_15px_rgba(236,72,153,0.15)]"}`}>
                   <Clock className="w-4 h-4" />
                   {timeLeft}
                 </div>
               </div>
               <div className="p-8">
-                <p className="text-zinc-300 mb-8 text-lg leading-relaxed">
-                  You have successfully reserved <span className="text-white font-bold px-2 py-1 bg-zinc-800 rounded-md border border-zinc-700 mx-1">{reservation.quantity} unit(s)</span>. Your reservation is active and will expire soon. Please confirm your purchase to secure the items.
-                </p>
+                <div className="bg-orange-50 border border-orange-100 rounded-2xl p-6 mb-8 text-center">
+                  <p className="text-slate-800 text-lg leading-relaxed font-medium">
+                    You have securely reserved <span className="text-orange-600 font-extrabold text-xl mx-1">{reservation.quantity} unit(s)</span>. 
+                    <br/><span className="text-slate-500 text-sm mt-2 block">Your reservation is active. Please confirm your purchase to secure the items.</span>
+                  </p>
+                </div>
+                
                 <div className="flex flex-col sm:flex-row gap-4">
                   <button
                     onClick={handleConfirm}
                     disabled={processing || timeLeft === "Expired"}
-                    className="flex-1 bg-indigo-600 text-white font-bold py-4 rounded-xl hover:bg-indigo-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_30px_rgba(79,70,229,0.5)]"
+                    className="flex-1 bg-slate-900 text-white font-bold py-4 rounded-2xl hover:bg-slate-800 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center shadow-lg hover:shadow-xl hover:-translate-y-0.5 active:translate-y-0"
                   >
-                    {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Confirm Purchase"}
+                    {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Pay Now"}
                   </button>
                   <button
                     onClick={handleExtend}
                     disabled={processing || extended || timeLeft === "Expired"}
-                    className="bg-zinc-800 text-indigo-400 border border-indigo-500/30 font-bold py-4 px-6 rounded-xl hover:bg-zinc-700 hover:text-indigo-300 transition-all duration-200 disabled:opacity-50 flex justify-center items-center group relative overflow-hidden"
+                    className="bg-white text-pink-600 border-2 border-pink-100 font-bold py-4 px-6 rounded-2xl hover:bg-pink-50 hover:border-pink-200 transition-all duration-200 disabled:opacity-50 flex justify-center items-center group shadow-sm active:scale-95"
                   >
                     {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : (
                       <>
@@ -299,7 +364,7 @@ export default function Store() {
                   <button
                     onClick={handleRelease}
                     disabled={processing}
-                    className="bg-zinc-800 text-zinc-400 border border-zinc-700 font-bold py-4 px-6 rounded-xl hover:bg-red-950/50 hover:text-red-400 hover:border-red-900/50 transition-all duration-200 disabled:opacity-50 flex justify-center items-center"
+                    className="bg-white text-slate-500 border-2 border-slate-100 font-bold py-4 px-6 rounded-2xl hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all duration-200 disabled:opacity-50 flex justify-center items-center active:scale-95"
                   >
                     {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Cancel"}
                   </button>
@@ -308,103 +373,120 @@ export default function Store() {
             </div>
           </motion.div>
         ) : (
-          <motion.div
-            key="store"
-            variants={staggerContainer}
-            initial="hidden"
-            animate="show"
-            exit={{ opacity: 0, y: -20 }}
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
-          >
-            {products.map((product) => (
-              <motion.div 
-                variants={itemVariant}
-                key={product.id} 
-                className="group bg-zinc-900/40 backdrop-blur-sm border border-zinc-800 hover:border-zinc-700 rounded-2xl overflow-hidden flex flex-col transition-all duration-300 hover:shadow-2xl hover:shadow-indigo-900/20"
+          <>
+            {filteredProducts.length === 0 ? (
+              <div className="text-center py-20">
+                <Search className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                <h3 className="text-2xl font-bold text-slate-700">No products found</h3>
+                <p className="text-slate-500 mt-2">Try adjusting your category or search query.</p>
+              </div>
+            ) : (
+              <motion.div
+                key="store"
+                variants={staggerContainer}
+                initial="hidden"
+                animate="show"
+                exit={{ opacity: 0, y: -20 }}
+                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
               >
-                <div className="aspect-[4/3] bg-zinc-800 relative overflow-hidden">
-                  <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-transparent to-transparent z-10" />
-                  {product.image && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={product.image} alt={product.name} className="object-cover w-full h-full absolute inset-0 transform group-hover:scale-105 transition-transform duration-700 ease-out" />
-                  )}
-                  <div className="absolute bottom-4 left-5 z-20">
-                    <h3 className="text-2xl font-bold text-white mb-1 drop-shadow-md">{product.name}</h3>
-                  </div>
-                </div>
-                
-                <div className="p-6 flex-1 flex flex-col">
-                  <p className="text-zinc-400 text-sm mb-6 line-clamp-2">{product.description}</p>
-                  
-                  <div className="mt-auto space-y-4">
-                    {product.inventories.map((inv) => {
-                      const isAvailable = inv.availableStock > 0;
-                      const isLowStock = isAvailable && inv.availableStock <= 5;
-                      const selectedQty = quantities[inv.id] || 1;
+                {filteredProducts.map((product) => {
+                  const category = CATEGORY_MAP[product.name] || "Uncategorized";
+                  return (
+                  <motion.div 
+                    variants={itemVariant}
+                    key={product.id} 
+                    className="group bg-white rounded-3xl overflow-hidden flex flex-col transition-all duration-300 shadow-sm border border-slate-100 hover:shadow-2xl hover:shadow-pink-100 hover:-translate-y-1"
+                  >
+                    <div className="aspect-[4/3] bg-slate-100 relative overflow-hidden">
+                      {product.image && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={product.image} alt={product.name} className="object-cover w-full h-full absolute inset-0 transform group-hover:scale-105 transition-transform duration-700 ease-out" />
+                      )}
+                      <div className="absolute top-4 left-4 z-20">
+                        <span className="bg-white/90 backdrop-blur-md text-slate-800 text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm">
+                          <Tag className="w-3 h-3 text-pink-500" />
+                          {category}
+                        </span>
+                      </div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10" />
+                    </div>
+                    
+                    <div className="p-6 flex-1 flex flex-col">
+                      <h3 className="text-2xl font-extrabold text-slate-900 mb-2">{product.name}</h3>
+                      <p className="text-slate-500 text-sm mb-6 line-clamp-2 leading-relaxed">{product.description}</p>
+                      
+                      <div className="mt-auto space-y-4">
+                        {product.inventories.map((inv) => {
+                          const isAvailable = inv.availableStock > 0;
+                          const isLowStock = isAvailable && inv.availableStock <= 5;
+                          const selectedQty = quantities[inv.id] || 1;
 
-                      return (
-                        <div key={inv.id} className="flex flex-col gap-3 bg-zinc-950/60 rounded-xl p-4 border border-zinc-800/80 relative overflow-hidden">
-                          {isLowStock && (
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/10 rounded-full blur-3xl -mr-10 -mt-10 animate-pulse pointer-events-none" />
-                          )}
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <div className="text-sm font-bold text-zinc-200">{inv.warehouse.name}</div>
-                              <div className={`text-xs font-semibold mt-0.5 flex items-center gap-1.5 ${
-                                isLowStock ? "text-red-400" : isAvailable ? "text-emerald-400" : "text-zinc-500"
-                              }`}>
-                                {isAvailable ? (
-                                  <>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${isLowStock ? "bg-red-400 animate-pulse" : "bg-emerald-400"}`} />
-                                    {inv.availableStock} in stock {isLowStock && "(Low!)"}
-                                  </>
-                                ) : "Out of stock"}
+                          return (
+                            <div key={inv.id} className="flex flex-col gap-3 bg-slate-50 rounded-2xl p-4 border border-slate-100 relative overflow-hidden group/inv">
+                              {isLowStock && (
+                                <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/10 rounded-full blur-2xl -mr-10 -mt-10 animate-pulse pointer-events-none" />
+                              )}
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <div className="text-sm font-bold text-slate-800">{inv.warehouse.name}</div>
+                                  <div className={`text-xs font-bold mt-1 flex items-center gap-1.5 ${
+                                    isLowStock ? "text-orange-500" : isAvailable ? "text-emerald-500" : "text-slate-400"
+                                  }`}>
+                                    {isAvailable ? (
+                                      <>
+                                        <div className={`w-1.5 h-1.5 rounded-full ${isLowStock ? "bg-orange-500 animate-pulse" : "bg-emerald-500"}`} />
+                                        {inv.availableStock} available {isLowStock && "(Low Stock!)"}
+                                      </>
+                                    ) : "Out of stock"}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between mt-2">
+                                <div className="flex items-center bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                                  <button 
+                                    onClick={() => updateQuantity(inv.id, -1, inv.availableStock)}
+                                    disabled={!isAvailable || selectedQty <= 1 || processing}
+                                    className="p-2 text-slate-500 hover:text-pink-600 hover:bg-pink-50 disabled:opacity-30 transition"
+                                  >
+                                    <Minus className="w-4 h-4" />
+                                  </button>
+                                  <div className="w-10 text-center text-sm font-extrabold text-slate-800">
+                                    {isAvailable ? selectedQty : 0}
+                                  </div>
+                                  <button 
+                                    onClick={() => updateQuantity(inv.id, 1, inv.availableStock)}
+                                    disabled={!isAvailable || selectedQty >= inv.availableStock || processing}
+                                    className="p-2 text-slate-500 hover:text-pink-600 hover:bg-pink-50 disabled:opacity-30 transition"
+                                  >
+                                    <Plus className="w-4 h-4" />
+                                  </button>
+                                </div>
+
+                                <button
+                                  onClick={() => handleReserve(inv.id, inv.availableStock)}
+                                  disabled={!isAvailable || processing}
+                                  className={`flex items-center gap-1 px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 ${
+                                    isAvailable 
+                                      ? "bg-slate-900 text-white hover:bg-pink-600 shadow-md hover:shadow-pink-500/30 active:scale-95" 
+                                      : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                                  }`}
+                                >
+                                  {isAvailable ? "Reserve" : "Sold Out"}
+                                  {isAvailable && <ChevronRight className="w-4 h-4 -mr-1" />}
+                                </button>
                               </div>
                             </div>
-                          </div>
-
-                          <div className="flex items-center justify-between mt-1">
-                            <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-                              <button 
-                                onClick={() => updateQuantity(inv.id, -1, inv.availableStock)}
-                                disabled={!isAvailable || selectedQty <= 1 || processing}
-                                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-30 transition"
-                              >
-                                <Minus className="w-4 h-4" />
-                              </button>
-                              <div className="w-10 text-center text-sm font-bold text-white">
-                                {isAvailable ? selectedQty : 0}
-                              </div>
-                              <button 
-                                onClick={() => updateQuantity(inv.id, 1, inv.availableStock)}
-                                disabled={!isAvailable || selectedQty >= inv.availableStock || processing}
-                                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 disabled:opacity-30 transition"
-                              >
-                                <Plus className="w-4 h-4" />
-                              </button>
-                            </div>
-
-                            <button
-                              onClick={() => handleReserve(inv.id, inv.availableStock)}
-                              disabled={!isAvailable || processing}
-                              className={`flex items-center gap-1 px-5 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 ${
-                                isAvailable 
-                                  ? "bg-white text-black hover:bg-zinc-200 shadow-[0_0_15px_rgba(255,255,255,0.1)] hover:shadow-[0_0_20px_rgba(255,255,255,0.2)] active:scale-95" 
-                                  : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-                              }`}
-                            >
-                              {isAvailable ? "Reserve" : "Sold Out"}
-                              {isAvailable && <ChevronRight className="w-4 h-4 -mr-1" />}
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </motion.div>
+                  )
+                })}
               </motion.div>
-            ))}
-          </motion.div>
+            )}
+          </>
         )}
       </AnimatePresence>
 
@@ -415,10 +497,10 @@ export default function Store() {
             initial={{ opacity: 0, y: 50, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-            className={`fixed bottom-6 right-6 p-4 rounded-xl shadow-2xl flex items-center gap-3 max-w-sm border backdrop-blur-xl z-50 ${
+            className={`fixed bottom-6 right-6 p-4 rounded-2xl shadow-2xl flex items-center gap-3 max-w-sm border backdrop-blur-xl z-50 ${
               toast.isError 
-                ? "bg-red-950/90 border-red-900 text-red-200" 
-                : "bg-emerald-950/90 border-emerald-900 text-emerald-200"
+                ? "bg-white/95 border-red-100 text-red-600 shadow-red-500/10" 
+                : "bg-white/95 border-emerald-100 text-emerald-600 shadow-emerald-500/10"
             }`}
           >
             {toast.isError ? (
@@ -426,8 +508,8 @@ export default function Store() {
             ) : (
               <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
             )}
-            <p className="font-medium text-sm">{toast.msg}</p>
-            <button onClick={() => setToast(null)} className="ml-auto p-1 rounded-md hover:bg-white/10 transition">
+            <p className="font-bold text-sm text-slate-800">{toast.msg}</p>
+            <button onClick={() => setToast(null)} className="ml-auto p-1.5 rounded-lg hover:bg-slate-100 transition text-slate-400">
               <X className="w-4 h-4" />
             </button>
           </motion.div>
