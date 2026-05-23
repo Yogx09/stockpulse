@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { formatDistanceToNowStrict } from "date-fns";
 import { Package, Clock, CheckCircle2, AlertTriangle, Loader2, Sparkles, X, ChevronRight, Plus, Minus, Timer, RefreshCw } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, Variants } from "framer-motion";
 
 type Product = {
   id: string;
@@ -31,7 +31,7 @@ type Reservation = {
   expiresAt: string;
 };
 
-const staggerContainer = {
+const staggerContainer: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
@@ -39,7 +39,7 @@ const staggerContainer = {
   }
 };
 
-const itemVariant = {
+const itemVariant: Variants = {
   hidden: { opacity: 0, y: 20 },
   show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
 };
