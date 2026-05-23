@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { formatDistanceToNowStrict } from "date-fns";
-import { ShoppingBag, Clock, CheckCircle2, AlertTriangle, Loader2, X, ChevronRight, Plus, Minus, Timer, RefreshCw, Search, Tag } from "lucide-react";
+import { formatDistanceToNowStrict, differenceInSeconds } from "date-fns";
+import { Box, Clock, CheckCircle2, AlertCircle, Loader2, X, ChevronRight, Plus, Minus, RefreshCw, BarChart3, PackageCheck, Layers, Activity } from "lucide-react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 
 type Product = {
@@ -31,28 +31,17 @@ type Reservation = {
   expiresAt: string;
 };
 
-const CATEGORY_MAP: Record<string, string> = {
-  "iPhone 15 Pro": "Smartphones",
-  "PlayStation 5 Pro": "Gaming",
-  "MacBook Pro M4": "Laptops",
-  "DJI Mini 4 Pro": "Drones",
-  "Sony Alpha a7 IV": "Photography",
-  "Logitech MX Master 3S": "Accessories"
-};
-
-const CATEGORIES = ["All", "Smartphones", "Gaming", "Laptops", "Drones", "Photography", "Accessories"];
-
 const staggerContainer: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: { staggerChildren: 0.08 }
+    transition: { staggerChildren: 0.05 }
   }
 };
 
 const itemVariant: Variants = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 400, damping: 30 } }
 };
 
 export default function Store() {
@@ -62,14 +51,11 @@ export default function Store() {
   
   const [toast, setToast] = useState<{ msg: string, isError: boolean, id: number } | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>("");
+  const [timerPercent, setTimerPercent] = useState<number>(100);
   const [processing, setProcessing] = useState(false);
   
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [extended, setExtended] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState("All");
 
   const showMessage = (msg: string, isError: boolean) => {
     setToast({ msg, isError, id: Date.now() });
@@ -84,7 +70,7 @@ export default function Store() {
         setProducts(await res.json());
       }
     } catch {
-      if (!silent) showMessage("Network error fetching products", true);
+      if (!silent) showMessage("Network error fetching inventory", true);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -94,23 +80,28 @@ export default function Store() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProducts();
-    
-    const pollInterval = setInterval(() => {
-      fetchProducts(true);
-    }, 5000);
-    
+    const pollInterval = setInterval(() => { fetchProducts(true); }, 5000);
     return () => clearInterval(pollInterval);
   }, [fetchProducts]);
 
   useEffect(() => {
     if (!reservation) return;
+    
+    // Total reservation time is 10 minutes (600 seconds)
+    const TOTAL_SECONDS = 600;
+    
     const interval = setInterval(() => {
       const expiry = new Date(reservation.expiresAt);
-      if (expiry <= new Date()) {
+      const now = new Date();
+      
+      if (expiry <= now) {
         setTimeLeft("Expired");
+        setTimerPercent(0);
         clearInterval(interval);
       } else {
         setTimeLeft(formatDistanceToNowStrict(expiry));
+        const diff = differenceInSeconds(expiry, now);
+        setTimerPercent(Math.max(0, Math.min(100, (diff / TOTAL_SECONDS) * 100)));
       }
     }, 1000);
     return () => clearInterval(interval);
@@ -118,19 +109,13 @@ export default function Store() {
 
   const handleReserve = async (inventoryId: string, maxStock: number) => {
     const quantity = quantities[inventoryId] || 1;
-    if (quantity > maxStock) {
-      showMessage(`Only ${maxStock} units available`, true);
-      return;
-    }
+    if (quantity > maxStock) return showMessage(`Only ${maxStock} available`, true);
     
     setProcessing(true);
     try {
       const res = await fetch("/api/reservations", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": crypto.randomUUID(),
-        },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({ inventoryId, quantity }),
       });
 
@@ -140,7 +125,6 @@ export default function Store() {
         fetchProducts(true);
       } else {
         setReservation(data.reservation);
-        setExtended(false);
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch {
@@ -161,11 +145,9 @@ export default function Store() {
       const data = await res.json();
       if (!res.ok) {
         showMessage(data.error || "Failed to confirm", true);
-        if (res.status === 410) {
-          setReservation(null);
-        }
+        if (res.status === 410) setReservation(null);
       } else {
-        showMessage("Purchase confirmed successfully!", false);
+        showMessage("Order confirmed successfully.", false);
         setReservation(null);
       }
       fetchProducts(true);
@@ -184,34 +166,11 @@ export default function Store() {
         method: "POST",
         headers: { "Idempotency-Key": crypto.randomUUID() },
       });
-      showMessage("Reservation cancelled", false);
+      showMessage("Reservation released.", false);
       setReservation(null);
       fetchProducts(true);
     } catch {
-      showMessage("Network error during cancellation", true);
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const handleExtend = async () => {
-    if (!reservation) return;
-    setProcessing(true);
-    try {
-      const res = await fetch(`/api/reservations/${reservation.id}/extend`, {
-        method: "POST",
-        headers: { "Idempotency-Key": crypto.randomUUID() },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        showMessage(data.error || "Failed to extend", true);
-      } else {
-        setReservation(data.reservation);
-        setExtended(true);
-        showMessage("Reservation extended by 5 minutes", false);
-      }
-    } catch {
-      showMessage("Network error extending reservation", true);
+      showMessage("Network error releasing reservation", true);
     } finally {
       setProcessing(false);
     }
@@ -225,144 +184,167 @@ export default function Store() {
     });
   };
 
-  const filteredProducts = useMemo(() => {
-    return products.filter(p => {
-      const category = CATEGORY_MAP[p.name] || "Uncategorized";
-      const matchesCategory = activeCategory === "All" || category === activeCategory;
-      const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            p.description.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesCategory && matchesSearch;
+  // Analytics Calculations
+  const stats = useMemo(() => {
+    let globalStock = 0;
+    let globalReserved = 0;
+    const warehouses = new Set<string>();
+
+    products.forEach(p => {
+      p.inventories.forEach(inv => {
+        globalStock += inv.totalStock;
+        globalReserved += inv.reservedStock;
+        warehouses.add(inv.warehouseId);
+      });
     });
-  }, [products, activeCategory, searchQuery]);
+
+    const utilization = globalStock === 0 ? 0 : Math.round((globalReserved / globalStock) * 100);
+
+    return {
+      productCount: products.length,
+      warehouseCount: warehouses.size,
+      globalStock,
+      utilization
+    };
+  }, [products]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }}>
-          <Loader2 className="w-12 h-12 text-indigo-500" />
-        </motion.div>
+      <div className="flex items-center justify-center min-h-screen bg-slate-50">
+        <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-4 md:p-8 pt-8 md:pt-16 pb-32">
-      <motion.div 
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: "easeOut" }}
-        className="mb-12"
-      >
-        <div className="flex flex-col md:flex-row justify-between items-center gap-6 bg-[#0B0F19] p-6 md:p-8 rounded-3xl shadow-2xl border border-slate-800 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-indigo-500 to-cyan-500 rounded-full blur-[80px] opacity-20 -mr-20 -mt-20 pointer-events-none"></div>
-          
-          <div className="flex-1 relative z-10 w-full text-center md:text-left">
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-white flex items-center justify-center md:justify-start gap-3">
-              <ShoppingBag className="w-10 h-10 text-indigo-500" />
-              Stockpulse
-            </h1>
-            <p className="text-slate-400 mt-2 font-medium">Enterprise inventory & reservation engine.</p>
-          </div>
+    <div className="max-w-[1400px] mx-auto p-4 md:p-8 pt-8 md:pt-12 pb-32">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
+        <div>
+          <h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-slate-900 flex items-center gap-3">
+            <Box className="w-8 h-8 text-indigo-600" strokeWidth={2.5} />
+            StockPulse
+          </h1>
+          <p className="text-slate-500 mt-2 font-medium tracking-tight">Real-Time Inventory Reservation Platform</p>
+        </div>
+        
+        <button 
+          onClick={() => { setIsRefreshing(true); fetchProducts(false); }}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm"
+        >
+          <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin text-indigo-600" : ""}`} />
+          Sync Data
+        </button>
+      </div>
 
-          {!reservation && (
-            <div className="flex-1 w-full relative z-10">
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Search className="h-5 w-5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
-                </div>
-                <input
-                  type="text"
-                  placeholder="Search products..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="block w-full pl-11 pr-4 py-3.5 bg-[#111827] border border-slate-800 rounded-2xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all shadow-inner"
+      {/* Analytics Dashboard */}
+      {!reservation && (
+        <motion.div 
+          variants={staggerContainer} initial="hidden" animate="show"
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-12"
+        >
+          <motion.div variants={itemVariant} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-slate-500 text-sm font-medium">Total Products</span>
+              <PackageCheck className="w-5 h-5 text-indigo-500" />
+            </div>
+            <div className="text-3xl font-semibold text-slate-900">{stats.productCount}</div>
+          </motion.div>
+          
+          <motion.div variants={itemVariant} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-slate-500 text-sm font-medium">Active Warehouses</span>
+              <Layers className="w-5 h-5 text-indigo-500" />
+            </div>
+            <div className="text-3xl font-semibold text-slate-900">{stats.warehouseCount}</div>
+          </motion.div>
+          
+          <motion.div variants={itemVariant} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-slate-500 text-sm font-medium">Global Stock</span>
+              <Box className="w-5 h-5 text-indigo-500" />
+            </div>
+            <div className="text-3xl font-semibold text-slate-900">{stats.globalStock}</div>
+          </motion.div>
+          
+          <motion.div variants={itemVariant} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-slate-500 text-sm font-medium">Inventory Utilization</span>
+              <Activity className="w-5 h-5 text-indigo-500" />
+            </div>
+            <div className="flex items-end gap-3">
+              <div className="text-3xl font-semibold text-slate-900">{stats.utilization}%</div>
+              <div className="flex-1 mb-2 h-2 bg-slate-100 rounded-full overflow-hidden">
+                <motion.div 
+                  initial={{ width: 0 }} animate={{ width: `${stats.utilization}%` }} transition={{ duration: 1, ease: "easeOut" }}
+                  className="h-full bg-indigo-500 rounded-full"
                 />
               </div>
             </div>
-          )}
-          
-          {!reservation && (
-            <button 
-              onClick={() => { setIsRefreshing(true); fetchProducts(false); }}
-              disabled={isRefreshing}
-              className="hidden md:flex items-center gap-2 bg-[#111827] hover:bg-slate-800 text-slate-300 border border-slate-800 px-5 py-3.5 rounded-2xl font-bold transition-all shadow-sm hover:shadow-md active:scale-95 whitespace-nowrap z-10"
-            >
-              <RefreshCw className={`w-5 h-5 ${isRefreshing ? "animate-spin text-indigo-400" : ""}`} />
-              Sync
-            </button>
-          )}
-        </div>
+          </motion.div>
+        </motion.div>
+      )}
 
-        {!reservation && (
-          <div className="mt-8 flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
-            {CATEGORIES.map(cat => (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={`px-5 py-2.5 rounded-full font-bold text-sm whitespace-nowrap transition-all duration-300 ${
-                  activeCategory === cat 
-                    ? "bg-indigo-600 text-white shadow-[0_0_20px_rgba(79,70,229,0.4)] scale-105 border border-indigo-500" 
-                    : "bg-[#0B0F19] text-slate-400 border border-slate-800 hover:border-slate-700 hover:text-slate-300"
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        )}
-      </motion.div>
-
+      {/* Main Content Area */}
       <AnimatePresence mode="wait">
         {reservation ? (
           <motion.div
             key="checkout"
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            initial={{ opacity: 0, scale: 0.98, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="w-full max-w-2xl mx-auto relative group"
+            exit={{ opacity: 0, scale: 0.98, y: -10 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            className="w-full max-w-xl mx-auto"
           >
-            <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-500 rounded-3xl blur opacity-40 group-hover:opacity-60 transition duration-1000 group-hover:duration-200 animate-gradient-xy"></div>
-            <div className="relative bg-[#0B0F19]/95 backdrop-blur-3xl border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
-              <div className="bg-[#111827] border-b border-slate-800 px-8 py-6 flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-white">Secure Checkout</h2>
-                <div className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold text-sm shadow-sm ${timeLeft === "Expired" ? "bg-red-500/10 text-red-400 border border-red-500/20" : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-[0_0_15px_rgba(99,102,241,0.2)]"}`}>
-                  <Clock className="w-4 h-4" />
-                  {timeLeft}
-                </div>
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+              {/* Progress Bar Header */}
+              <div className="h-1.5 w-full bg-slate-100">
+                <motion.div 
+                  className={`h-full ${timerPercent < 20 ? 'bg-red-500' : 'bg-indigo-500'}`}
+                  initial={{ width: '100%' }}
+                  animate={{ width: `${timerPercent}%` }}
+                  transition={{ ease: "linear", duration: 1 }}
+                />
               </div>
+
               <div className="p-8">
-                <div className="bg-[#111827] border border-indigo-500/20 rounded-2xl p-6 mb-8 text-center shadow-inner">
-                  <p className="text-slate-300 text-lg leading-relaxed font-medium">
-                    You have securely reserved <span className="text-white bg-indigo-600/20 border border-indigo-500/30 px-3 py-1 rounded-md font-extrabold text-xl mx-1">{reservation.quantity} unit(s)</span>. 
-                    <br/><span className="text-slate-500 text-sm mt-3 block">Your reservation is locked. Please confirm your purchase to secure the items.</span>
-                  </p>
+                <div className="flex justify-between items-start mb-8">
+                  <div>
+                    <h2 className="text-2xl font-semibold text-slate-900 tracking-tight">Complete Order</h2>
+                    <p className="text-slate-500 mt-1">Inventory is locked.</p>
+                  </div>
+                  <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm border ${timeLeft === "Expired" ? "bg-red-50 text-red-600 border-red-100" : "bg-slate-50 text-slate-700 border-slate-200"}`}>
+                    <Clock className="w-4 h-4" />
+                    {timeLeft}
+                  </div>
                 </div>
                 
-                <div className="flex flex-col sm:flex-row gap-4">
+                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-6 mb-8 flex items-center justify-between">
+                   <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-white rounded-xl shadow-sm border border-slate-200 flex items-center justify-center">
+                         <PackageCheck className="w-6 h-6 text-indigo-600" />
+                      </div>
+                      <div>
+                        <div className="text-slate-900 font-semibold">Reserved Units</div>
+                        <div className="text-slate-500 text-sm">Valid for {timeLeft}</div>
+                      </div>
+                   </div>
+                   <div className="text-2xl font-semibold text-slate-900">{reservation.quantity}x</div>
+                </div>
+                
+                <div className="flex flex-col sm:flex-row gap-3">
                   <button
                     onClick={handleConfirm}
                     disabled={processing || timeLeft === "Expired"}
-                    className="flex-1 bg-white text-slate-900 font-bold py-4 rounded-2xl hover:bg-slate-200 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center shadow-[0_0_20px_rgba(255,255,255,0.15)] hover:shadow-[0_0_30px_rgba(255,255,255,0.25)] active:scale-95"
+                    className="flex-1 bg-indigo-600 text-white font-semibold py-3.5 rounded-xl hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center shadow-sm"
                   >
                     {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Confirm Order"}
                   </button>
                   <button
-                    onClick={handleExtend}
-                    disabled={processing || extended || timeLeft === "Expired"}
-                    className="bg-[#111827] text-cyan-400 border border-cyan-500/30 font-bold py-4 px-6 rounded-2xl hover:bg-cyan-500/10 hover:border-cyan-400 transition-all duration-200 disabled:opacity-50 flex justify-center items-center group shadow-sm active:scale-95"
-                  >
-                    {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : (
-                      <>
-                        <Timer className="w-5 h-5 mr-2" />
-                        +5m Time
-                      </>
-                    )}
-                  </button>
-                  <button
                     onClick={handleRelease}
                     disabled={processing}
-                    className="bg-[#111827] text-slate-400 border border-slate-800 font-bold py-4 px-6 rounded-2xl hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 transition-all duration-200 disabled:opacity-50 flex justify-center items-center active:scale-95"
+                    className="bg-white text-slate-600 border border-slate-200 font-semibold py-3.5 px-6 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50 flex justify-center items-center"
                   >
                     {processing ? <Loader2 className="w-5 h-5 animate-spin" /> : "Release"}
                   </button>
@@ -371,143 +353,116 @@ export default function Store() {
             </div>
           </motion.div>
         ) : (
-          <>
-            {filteredProducts.length === 0 ? (
-              <div className="text-center py-20">
-                <Search className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-                <h3 className="text-2xl font-bold text-slate-300">No products found</h3>
-                <p className="text-slate-500 mt-2">Try adjusting your category or search query.</p>
-              </div>
-            ) : (
-              <motion.div
-                key="store"
-                variants={staggerContainer}
-                initial="hidden"
-                animate="show"
-                exit={{ opacity: 0, y: -20 }}
-                className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
+          <motion.div
+            key="store"
+            variants={staggerContainer}
+            initial="hidden"
+            animate="show"
+            exit={{ opacity: 0 }}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+          >
+            {products.map((product) => (
+              <motion.div 
+                variants={itemVariant}
+                key={product.id} 
+                className="bg-white rounded-2xl flex flex-col border border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-300 overflow-hidden"
               >
-                {filteredProducts.map((product) => {
-                  const category = CATEGORY_MAP[product.name] || "Uncategorized";
-                  return (
-                  <motion.div 
-                    variants={itemVariant}
-                    key={product.id} 
-                    className="group bg-[#0B0F19] rounded-3xl overflow-hidden flex flex-col transition-all duration-300 shadow-xl border border-slate-800 hover:border-slate-700 hover:shadow-2xl hover:shadow-indigo-500/10 hover:-translate-y-1"
-                  >
-                    <div className="aspect-[4/3] bg-slate-900 relative overflow-hidden">
-                      {product.image && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={product.image} alt={product.name} className="object-cover w-full h-full absolute inset-0 transform group-hover:scale-105 transition-transform duration-700 ease-out opacity-90 group-hover:opacity-100" />
-                      )}
-                      <div className="absolute top-4 left-4 z-20">
-                        <span className="bg-slate-900/80 backdrop-blur-md text-slate-200 border border-slate-700 text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm">
-                          <Tag className="w-3 h-3 text-cyan-400" />
-                          {category}
-                        </span>
-                      </div>
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#0B0F19] via-transparent to-transparent opacity-80 z-10" />
-                    </div>
-                    
-                    <div className="p-6 flex-1 flex flex-col">
-                      <h3 className="text-2xl font-extrabold text-white mb-2">{product.name}</h3>
-                      <p className="text-slate-400 text-sm mb-6 line-clamp-2 leading-relaxed">{product.description}</p>
-                      
-                      <div className="mt-auto space-y-4">
-                        {product.inventories.map((inv) => {
-                          const isAvailable = inv.availableStock > 0;
-                          const isLowStock = isAvailable && inv.availableStock <= 5;
-                          const selectedQty = quantities[inv.id] || 1;
+                <div className="p-6 border-b border-slate-100 flex gap-5">
+                  <div className="w-20 h-20 rounded-xl bg-slate-50 border border-slate-100 overflow-hidden flex-shrink-0">
+                    {product.image && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={product.image} alt={product.name} className="object-cover w-full h-full" />
+                    )}
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900 tracking-tight leading-tight mb-1">{product.name}</h3>
+                    <p className="text-slate-500 text-sm line-clamp-2 leading-relaxed">{product.description}</p>
+                  </div>
+                </div>
+                
+                <div className="p-6 bg-slate-50/50 flex-1 flex flex-col gap-4">
+                  {product.inventories.map((inv) => {
+                    const isAvailable = inv.availableStock > 0;
+                    const isLowStock = isAvailable && inv.availableStock <= 5;
+                    const selectedQty = quantities[inv.id] || 1;
 
-                          return (
-                            <div key={inv.id} className="flex flex-col gap-3 bg-[#111827] rounded-2xl p-4 border border-slate-800 relative overflow-hidden group/inv">
-                              {isLowStock && (
-                                <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/10 rounded-full blur-2xl -mr-10 -mt-10 animate-pulse pointer-events-none" />
-                              )}
-                              <div className="flex justify-between items-start">
-                                <div>
-                                  <div className="text-sm font-bold text-slate-200">{inv.warehouse.name}</div>
-                                  <div className={`text-xs font-bold mt-1 flex items-center gap-1.5 ${
-                                    isLowStock ? "text-red-400" : isAvailable ? "text-emerald-400" : "text-slate-500"
-                                  }`}>
-                                    {isAvailable ? (
-                                      <>
-                                        <div className={`w-1.5 h-1.5 rounded-full ${isLowStock ? "bg-red-500 animate-pulse" : "bg-emerald-500"}`} />
-                                        {inv.availableStock} available {isLowStock && "(Low Stock!)"}
-                                      </>
-                                    ) : "Out of stock"}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between mt-2">
-                                <div className="flex items-center bg-[#0B0F19] border border-slate-700 rounded-xl overflow-hidden shadow-inner">
-                                  <button 
-                                    onClick={() => updateQuantity(inv.id, -1, inv.availableStock)}
-                                    disabled={!isAvailable || selectedQty <= 1 || processing}
-                                    className="p-2 text-slate-500 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition"
-                                  >
-                                    <Minus className="w-4 h-4" />
-                                  </button>
-                                  <div className="w-10 text-center text-sm font-extrabold text-white">
-                                    {isAvailable ? selectedQty : 0}
-                                  </div>
-                                  <button 
-                                    onClick={() => updateQuantity(inv.id, 1, inv.availableStock)}
-                                    disabled={!isAvailable || selectedQty >= inv.availableStock || processing}
-                                    className="p-2 text-slate-500 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition"
-                                  >
-                                    <Plus className="w-4 h-4" />
-                                  </button>
-                                </div>
-
-                                <button
-                                  onClick={() => handleReserve(inv.id, inv.availableStock)}
-                                  disabled={!isAvailable || processing}
-                                  className={`flex items-center gap-1 px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-200 ${
-                                    isAvailable 
-                                      ? "bg-indigo-600 text-white hover:bg-indigo-500 shadow-md hover:shadow-indigo-500/30 active:scale-95" 
-                                      : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
-                                  }`}
-                                >
-                                  {isAvailable ? "Reserve" : "Sold Out"}
-                                  {isAvailable && <ChevronRight className="w-4 h-4 -mr-1" />}
-                                </button>
-                              </div>
+                    return (
+                      <div key={inv.id} className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <div className="text-sm font-semibold text-slate-900">{inv.warehouse.name}</div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              {/* Smart Badge */}
+                              <div className={`w-2 h-2 rounded-full ${!isAvailable ? "bg-slate-300" : isLowStock ? "bg-amber-500 animate-pulse" : "bg-emerald-500"}`} />
+                              <span className={`text-xs font-medium ${!isAvailable ? "text-slate-500" : isLowStock ? "text-amber-600" : "text-emerald-600"}`}>
+                                {!isAvailable ? "Out of Stock" : isLowStock ? `${inv.availableStock} Left - Expiring Soon` : `${inv.availableStock} Available`}
+                              </span>
                             </div>
-                          )
-                        })}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg">
+                            <button 
+                              onClick={() => updateQuantity(inv.id, -1, inv.availableStock)}
+                              disabled={!isAvailable || selectedQty <= 1 || processing}
+                              className="p-2.5 text-slate-500 hover:text-slate-900 disabled:opacity-30 transition-colors"
+                            >
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                            <div className="w-8 text-center text-sm font-semibold text-slate-900">
+                              {isAvailable ? selectedQty : 0}
+                            </div>
+                            <button 
+                              onClick={() => updateQuantity(inv.id, 1, inv.availableStock)}
+                              disabled={!isAvailable || selectedQty >= inv.availableStock || processing}
+                              className="p-2.5 text-slate-500 hover:text-slate-900 disabled:opacity-30 transition-colors"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <button
+                            onClick={() => handleReserve(inv.id, inv.availableStock)}
+                            disabled={!isAvailable || processing}
+                            className={`flex-1 flex items-center justify-center gap-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                              isAvailable 
+                                ? "bg-slate-900 text-white hover:bg-slate-800 shadow-sm" 
+                                : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                            }`}
+                          >
+                            Reserve
+                            {isAvailable && <ChevronRight className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </motion.div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </motion.div>
-            )}
-          </>
+            ))}
+          </motion.div>
         )}
       </AnimatePresence>
 
+      {/* Minimal Toast Notification */}
       <AnimatePresence>
         {toast && (
           <motion.div
             key={toast.id}
-            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            initial={{ opacity: 0, y: 10, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-            className={`fixed bottom-6 right-6 p-4 rounded-2xl shadow-2xl flex items-center gap-3 max-w-sm border backdrop-blur-xl z-50 ${
-              toast.isError 
-                ? "bg-red-950/90 border-red-900/50 text-red-200 shadow-red-900/20" 
-                : "bg-emerald-950/90 border-emerald-900/50 text-emerald-200 shadow-emerald-900/20"
-            }`}
+            exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+            className="fixed bottom-6 right-6 p-4 rounded-xl shadow-lg border bg-white flex items-center gap-3 max-w-sm z-50"
+            style={{ borderColor: toast.isError ? '#fecaca' : '#bbf7d0' }}
           >
             {toast.isError ? (
-              <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+              <AlertCircle className="w-5 h-5 text-red-500 shrink-0" />
             ) : (
               <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
             )}
-            <p className="font-bold text-sm text-slate-200">{toast.msg}</p>
-            <button onClick={() => setToast(null)} className="ml-auto p-1.5 rounded-lg hover:bg-slate-800 transition text-slate-400">
+            <p className="font-medium text-sm text-slate-700">{toast.msg}</p>
+            <button onClick={() => setToast(null)} className="ml-auto text-slate-400 hover:text-slate-600 transition">
               <X className="w-4 h-4" />
             </button>
           </motion.div>
