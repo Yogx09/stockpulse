@@ -50,6 +50,145 @@ type Reservation = {
   image?: string;
 };
 
+const DEFAULT_PRODUCTS: Product[] = [
+  {
+    id: "prod_iphone",
+    name: "iPhone 15 Pro",
+    description: "Apple flagship smartphone with titanium design and A17 Pro chip.",
+    image: "https://images.unsplash.com/photo-1695048133142-1a20484d2569",
+    totalStock: 18,
+    reservedStock: 2,
+    availableStock: 16,
+    oldPrice: "1140.00",
+    discount: "5%",
+    newPrice: "1083.00",
+    itemsSold: 294,
+    inventories: [
+      { id: "inv_1", warehouseId: "wh_del", totalStock: 15, reservedStock: 2, availableStock: 13, warehouse: { name: "Delhi Node", location: "New Delhi" } },
+      { id: "inv_2", warehouseId: "wh_mum", totalStock: 3, reservedStock: 0, availableStock: 3, warehouse: { name: "Mumbai Node", location: "Mumbai" } }
+    ]
+  },
+  {
+    id: "prod_ps5",
+    name: "PlayStation 5 Pro",
+    description: "Next-gen Sony gaming console with ultra-fast SSD and ray tracing.",
+    image: "https://images.unsplash.com/photo-1606813907291-d86efa9b94db",
+    totalStock: 17,
+    reservedStock: 1,
+    availableStock: 16,
+    oldPrice: "550.00",
+    discount: "8%",
+    newPrice: "506.00",
+    itemsSold: 182,
+    inventories: [
+      { id: "inv_3", warehouseId: "wh_del", totalStock: 5, reservedStock: 0, availableStock: 5, warehouse: { name: "Delhi Node", location: "New Delhi" } },
+      { id: "inv_4", warehouseId: "wh_hyd", totalStock: 12, reservedStock: 1, availableStock: 11, warehouse: { name: "Hyderabad Central", location: "Hyderabad" } }
+    ]
+  },
+  {
+    id: "prod_macbook",
+    name: "MacBook Pro M4",
+    description: "Apple's most powerful laptop designed for pro workflows.",
+    image: "https://images.unsplash.com/photo-1517336714739-489689fd1ca8",
+    totalStock: 8,
+    reservedStock: 1,
+    availableStock: 7,
+    oldPrice: "1999.00",
+    discount: "10%",
+    newPrice: "1799.10",
+    itemsSold: 69,
+    inventories: [
+      { id: "inv_5", warehouseId: "wh_blr", totalStock: 8, reservedStock: 1, availableStock: 7, warehouse: { name: "Bengaluru Hub", location: "Bengaluru" } }
+    ]
+  },
+  {
+    id: "prod_drone",
+    name: "DJI Mini 4 Pro",
+    description: "Compact foldable drone with 4K HDR obstacle sensing.",
+    image: "https://images.unsplash.com/photo-1579829366248-204fe8413f31",
+    totalStock: 12,
+    reservedStock: 0,
+    availableStock: 12,
+    oldPrice: "759.00",
+    discount: "5%",
+    newPrice: "721.05",
+    itemsSold: 32,
+    inventories: [
+      { id: "inv_6", warehouseId: "wh_mum", totalStock: 2, reservedStock: 0, availableStock: 2, warehouse: { name: "Mumbai Node", location: "Mumbai" } },
+      { id: "inv_7", warehouseId: "wh_del", totalStock: 10, reservedStock: 0, availableStock: 10, warehouse: { name: "Delhi Node", location: "New Delhi" } }
+    ]
+  },
+  {
+    id: "prod_camera",
+    name: "Sony Alpha a7 IV",
+    description: "Full-frame hybrid mirrorless camera for photos & 4K video.",
+    image: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32",
+    totalStock: 4,
+    reservedStock: 0,
+    availableStock: 4,
+    oldPrice: "2498.00",
+    discount: "12%",
+    newPrice: "2198.24",
+    itemsSold: 145,
+    inventories: [
+      { id: "inv_8", warehouseId: "wh_hyd", totalStock: 4, reservedStock: 0, availableStock: 4, warehouse: { name: "Hyderabad Central", location: "Hyderabad" } }
+    ]
+  },
+  {
+    id: "prod_mouse",
+    name: "Logitech MX Master 3S",
+    description: "Ergonomic wireless mouse with 8K DPI sensor and quiet clicks.",
+    image: "https://images.unsplash.com/photo-1615663245857-ac93bb7c3c9c",
+    totalStock: 55,
+    reservedStock: 2,
+    availableStock: 53,
+    oldPrice: "99.00",
+    discount: "15%",
+    newPrice: "84.15",
+    itemsSold: 388,
+    inventories: [
+      { id: "inv_9", warehouseId: "wh_blr", totalStock: 25, reservedStock: 1, availableStock: 24, warehouse: { name: "Bengaluru Hub", location: "Bengaluru" } },
+      { id: "inv_10", warehouseId: "wh_mum", totalStock: 30, reservedStock: 1, availableStock: 29, warehouse: { name: "Mumbai Node", location: "Mumbai" } }
+    ]
+  }
+];
+
+const DEFAULT_RESERVATIONS: Reservation[] = [
+  {
+    id: "res_active_01",
+    inventoryId: "inv_1",
+    quantity: 1,
+    status: "PENDING",
+    expiresAt: new Date(Date.now() + 8 * 60 * 1000).toISOString(),
+    createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    productName: "iPhone 15 Pro",
+    warehouseName: "Delhi Node",
+    image: "https://images.unsplash.com/photo-1695048133142-1a20484d2569"
+  },
+  {
+    id: "res_active_02",
+    inventoryId: "inv_4",
+    quantity: 1,
+    status: "PENDING",
+    expiresAt: new Date(Date.now() + 6 * 60 * 1000).toISOString(),
+    createdAt: new Date(Date.now() - 4 * 60 * 1000).toISOString(),
+    productName: "PlayStation 5 Pro",
+    warehouseName: "Hyderabad Central",
+    image: "https://images.unsplash.com/photo-1606813907291-d86efa9b94db"
+  },
+  {
+    id: "res_conf_01",
+    inventoryId: "inv_5",
+    quantity: 1,
+    status: "CONFIRMED",
+    expiresAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+    createdAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+    productName: "MacBook Pro M4",
+    warehouseName: "Bengaluru Hub",
+    image: "https://images.unsplash.com/photo-1517336714739-489689fd1ca8"
+  }
+];
+
 const formatDateSafe = (dateStr?: string | Date | null) => {
   if (!dateStr) return "Just now";
   try {
@@ -63,9 +202,9 @@ const formatDateSafe = (dateStr?: string | Date | null) => {
 
 export default function Store() {
   const [currentView, setCurrentView] = useState<"Dashboard" | "Products" | "Reservations" | "Warehouses" | "Analytics" | "Realtime">("Dashboard");
-  const [products, setProducts] = useState<Product[]>([]);
-  const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS);
+  const [reservations, setReservations] = useState<Reservation[]>(DEFAULT_RESERVATIONS);
+  const [loading, setLoading] = useState(false);
   
   // Time filter state
   const [categoryTimeFilter, setCategoryTimeFilter] = useState<"All time" | "Weekly" | "Monthly">("Monthly");
@@ -81,7 +220,7 @@ export default function Store() {
 
   // Real-time reservation state
   const [activeReservation, setActiveReservation] = useState<Reservation | null>(null);
-  const [selectedRes, setSelectedRes] = useState<Reservation | null>(null);
+  const [selectedRes, setSelectedRes] = useState<Reservation | null>(DEFAULT_RESERVATIONS[0]);
   
   const [toast, setToast] = useState<{ msg: string, isError: boolean, id: number } | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>("10:00");
@@ -147,12 +286,15 @@ export default function Store() {
   useEffect(() => {
     try {
       const cachedProd = localStorage.getItem("stockpulse_products_cache");
-      if (cachedProd) setProducts(JSON.parse(cachedProd));
+      if (cachedProd) {
+        const parsed = JSON.parse(cachedProd);
+        if (Array.isArray(parsed) && parsed.length > 0) setProducts(parsed);
+      }
       const cachedRes = localStorage.getItem("stockpulse_reservations_cache");
       if (cachedRes) {
         const parsed = JSON.parse(cachedRes);
-        setReservations(parsed);
-        if (parsed.length > 0 && !selectedRes) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setReservations(parsed);
           setSelectedRes(parsed[0]);
         }
       }
@@ -173,14 +315,16 @@ export default function Store() {
 
       if (prodRes.ok) {
         const prodData = await prodRes.json();
-        setProducts(prodData);
-        try { localStorage.setItem("stockpulse_products_cache", JSON.stringify(prodData)); } catch {}
+        if (Array.isArray(prodData) && prodData.length > 0) {
+          setProducts(prodData);
+          try { localStorage.setItem("stockpulse_products_cache", JSON.stringify(prodData)); } catch {}
+        }
       }
       if (resRes.ok) {
         const resData = await resRes.json();
-        setReservations(resData);
-        try { localStorage.setItem("stockpulse_reservations_cache", JSON.stringify(resData)); } catch {}
-        if (resData.length > 0) {
+        if (Array.isArray(resData) && resData.length > 0) {
+          setReservations(resData);
+          try { localStorage.setItem("stockpulse_reservations_cache", JSON.stringify(resData)); } catch {}
           setSelectedRes(prev => {
             if (!prev) return resData[0];
             return resData.find((r: Reservation) => r.id === prev.id) || resData[0];
@@ -250,7 +394,7 @@ export default function Store() {
 
     connectWs();
     const pollInterval = setInterval(() => fetchData(true), 15000);
-    fetchData();
+    fetchData(true);
 
     return () => {
       clearTimeout(reconnectTimer);
@@ -375,7 +519,7 @@ export default function Store() {
   };
 
   const handleConfirm = async () => {
-    const target = selectedRes || activeReservation;
+    const target = selectedRes || activeReservation || (reservations.length > 0 ? reservations[0] : null);
     if (!target) return;
     setProcessing("confirm");
     try {
@@ -402,7 +546,7 @@ export default function Store() {
   };
 
   const handleRelease = async () => {
-    const target = selectedRes || activeReservation;
+    const target = selectedRes || activeReservation || (reservations.length > 0 ? reservations[0] : null);
     if (!target) return;
     setProcessing("release");
     try {
@@ -519,7 +663,7 @@ export default function Store() {
     });
   }, [products]);
 
-  const displayRes = selectedRes || activeReservation || reservations[0];
+  const displayRes = selectedRes || activeReservation || (reservations.length > 0 ? reservations[0] : DEFAULT_RESERVATIONS[0]);
 
   const filteredRetailProducts = useMemo(() => {
     if (!searchQuery.trim()) return retailProducts;
