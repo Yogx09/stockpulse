@@ -622,33 +622,39 @@ export default function Store() {
                   {/* TOP ROW: 4 HERO METRIC WIDGETS */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                     
-                    {/* CARD 1: TOTAL ORDERS (Obsidian Dark) */}
+                    {/* CARD 1: TOTAL RESERVATIONS (Obsidian Dark) */}
                     <div className="bg-[#14161a] text-white rounded-3xl p-6 shadow-xl flex flex-col justify-between relative overflow-hidden min-h-[220px]">
                       <div className="flex justify-between items-start">
                         <div>
-                          <div className="text-xs font-semibold text-slate-400 mb-1">Total Orders</div>
+                          <div className="text-xs font-semibold text-slate-400 mb-1">Total Reservations</div>
                           <div className="text-3xl font-black tracking-tight text-white flex items-center gap-2">
-                            ${(stats.totalOrdersAmount).toLocaleString()}
-                            <span className="text-[11px] font-bold text-red-400 bg-red-500/15 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                              ↘ 10%
+                            {stats.totalRes} Locks
+                            <span className="text-[11px] font-bold text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                              {stats.activeRes} Active
                             </span>
                           </div>
-                          <div className="text-[11px] text-slate-400 mt-0.5 font-medium">$15.650 last month</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 font-medium">
+                            {stats.confirmed} confirmed orders • {stats.expiredOrReleased} released
+                          </div>
                         </div>
-                        <button className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 flex items-center justify-center transition">
-                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                        <button 
+                          onClick={() => setCurrentView("Reservations")}
+                          className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 flex items-center justify-center transition"
+                          title="View all reservations"
+                        >
+                          <ArrowUpRight className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
                       {/* Sparkline Wave with Tooltip */}
                       <div className="relative pt-6 pb-1">
                         <div className="absolute right-12 top-2 bg-white text-slate-950 font-mono font-bold text-[10px] px-2 py-0.5 rounded-md shadow-md">
-                          $1210.6
+                          {stats.activeRes} Active TTL
                         </div>
                         <svg className="w-full h-16 overflow-visible" viewBox="0 0 260 60">
                           <defs>
                             <linearGradient id="curveGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.2" />
+                              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.25" />
                               <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
                             </linearGradient>
                           </defs>
@@ -666,69 +672,97 @@ export default function Store() {
                           <circle cx="195" cy="20" r="4.5" fill="#ffffff" stroke="#14161a" strokeWidth="2.5" />
                         </svg>
                         <div className="flex justify-between text-[10px] font-semibold text-slate-500 mt-2 px-1">
-                          <span>1Feb</span>
-                          <span>8Feb</span>
-                          <span>16Feb</span>
-                          <span>25Feb</span>
-                          <span>30Feb</span>
+                          <span>10m ago</span>
+                          <span>8m</span>
+                          <span>5m</span>
+                          <span>2m</span>
+                          <span>Now</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* CARD 2: TOTAL CUSTOMERS (Electric Flame Orange) */}
+                    {/* CARD 2: PENDING VS CONFIRMED RATIO (Electric Flame Orange) */}
                     <div className="bg-[#ff3b00] text-white rounded-3xl p-6 shadow-xl shadow-[#ff3b00]/25 flex flex-col justify-between relative overflow-hidden min-h-[220px]">
                       <div className="flex justify-between items-start">
                         <div>
-                          <div className="text-xs font-semibold text-white/80 mb-1">Total Customers</div>
+                          <div className="text-xs font-semibold text-white/80 mb-1">Pending vs Confirmed</div>
                           <div className="text-3xl font-black tracking-tight text-white flex items-center gap-2">
-                            1.222
+                            {stats.activeRes} Pending
                             <span className="text-[11px] font-bold text-white bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                              ↗ +79%
+                              +{stats.confirmed} Confirmed
                             </span>
                           </div>
-                          <div className="text-[11px] text-white/80 mt-0.5 font-medium">683 users last month</div>
+                          <div className="text-[11px] text-white/80 mt-0.5 font-medium">
+                            {stats.expiringSoon > 0 ? `${stats.expiringSoon} expiring in <5 mins` : "All locks within safe TTL"}
+                          </div>
                         </div>
-                        <button className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition">
-                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                        <button 
+                          onClick={() => setSimModalOpen(true)}
+                          className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition"
+                          title="Simulate Concurrency"
+                        >
+                          <Zap className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
                       {/* Split Ratio Slider */}
                       <div className="pt-6">
-                        <div className="flex h-14 w-full rounded-2xl overflow-hidden bg-black/10 p-1 gap-1">
-                          <div className="w-[28%] bg-white rounded-xl flex items-center justify-center text-slate-900 font-black text-xs">
-                            23%
-                          </div>
-                          <div className="flex-1 bg-[#14161a] rounded-xl flex items-center justify-center text-white font-black text-xs">
-                            77%
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-6 mt-3 text-[11px] font-bold text-white/90">
-                          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-white" /> Men</span>
-                          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#14161a]" /> Women</span>
-                        </div>
+                        {(() => {
+                          const total = Math.max(1, stats.activeRes + stats.confirmed);
+                          const pendingPct = Math.max(20, Math.min(80, Math.round((stats.activeRes / total) * 100)));
+                          const confirmedPct = 100 - pendingPct;
+
+                          return (
+                            <>
+                              <div className="flex h-14 w-full rounded-2xl overflow-hidden bg-black/10 p-1 gap-1">
+                                <div 
+                                  style={{ width: `${pendingPct}%` }}
+                                  className="bg-white rounded-xl flex items-center justify-center text-slate-900 font-black text-xs transition-all"
+                                >
+                                  {pendingPct}%
+                                </div>
+                                <div 
+                                  style={{ width: `${confirmedPct}%` }}
+                                  className="bg-[#14161a] rounded-xl flex items-center justify-center text-white font-black text-xs transition-all"
+                                >
+                                  {confirmedPct}%
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-6 mt-3 text-[11px] font-bold text-white/90">
+                                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-white" /> ⏳ Pending Locks</span>
+                                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#14161a]" /> ✅ Confirmed Orders</span>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
 
-                    {/* CARD 3: TOTAL REVENUE (Pure White Card) */}
+                    {/* CARD 3: GLOBAL INVENTORY & STOCK (Pure White Card) */}
                     <div className="bg-white text-slate-900 rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col justify-between min-h-[220px]">
                       <div className="flex justify-between items-start">
                         <div>
-                          <div className="text-xs font-semibold text-slate-400 mb-1">Total Revenue</div>
+                          <div className="text-xs font-semibold text-slate-400 mb-1">Global Inventory Stock</div>
                           <div className="text-3xl font-black tracking-tight text-slate-900 flex items-center gap-2">
-                            ${(stats.totalRevenue).toLocaleString()}
+                            {(stats.globalStock).toLocaleString()}
                             <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-0.5">
-                              ↗ +21%
+                              🟢 0% Oversell
                             </span>
                           </div>
-                          <div className="text-[11px] text-slate-400 mt-0.5 font-medium">$73 925 last month</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 font-medium">
+                            {stats.globalAvailable} available • {stats.globalReserved} locked
+                          </div>
                         </div>
-                        <button className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition">
-                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                        <button 
+                          onClick={() => setCurrentView("Warehouses")}
+                          className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition"
+                          title="Warehouse Nodes"
+                        >
+                          <Truck className="w-3.5 h-3.5" />
                         </button>
                       </div>
 
-                      {/* Heatmap Vertical Matrix */}
+                      {/* Heatmap Vertical Matrix for Warehouse Traffic */}
                       <div className="pt-6">
                         <div className="flex justify-between items-end h-16 px-1">
                           {[
@@ -736,7 +770,7 @@ export default function Store() {
                             { day: "Tue", bars: 4, active: false },
                             { day: "Wed", bars: 2, active: false },
                             { day: "Thu", bars: 7, active: true },
-                            { day: "Fri", bars: 4, active: false },
+                            { day: "Fri", bars: 5, active: false },
                             { day: "Sat", bars: 3, active: false },
                             { day: "Sun", bars: 2, active: false },
                           ].map((col, idx) => (
@@ -763,11 +797,14 @@ export default function Store() {
                       </div>
                     </div>
 
-                    {/* CARD 4: TOP CATEGORIES (Radial Donut) */}
+                    {/* CARD 4: WAREHOUSE CLUSTER ALLOCATION (Radial Donut) */}
                     <div className="bg-white text-slate-900 rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col justify-between min-h-[220px]">
                       <div className="flex justify-between items-center mb-2">
-                        <div className="text-sm font-bold text-slate-900">Top categories</div>
-                        <button className="text-slate-400 hover:text-slate-900 transition">
+                        <div className="text-sm font-bold text-slate-900">Warehouse Nodes</div>
+                        <button 
+                          onClick={() => setCurrentView("Warehouses")}
+                          className="text-slate-400 hover:text-slate-900 transition"
+                        >
                           <ArrowUpRight className="w-4 h-4" />
                         </button>
                       </div>
@@ -783,16 +820,16 @@ export default function Store() {
                           <circle cx="50" cy="50" r="38" fill="transparent" stroke="#94a3b8" strokeWidth="14" strokeDasharray="30 208" strokeDashoffset="-180" />
                         </svg>
                         <div className="absolute flex flex-col items-center">
-                          <span className="text-xs font-black text-slate-900">35%</span>
+                          <span className="text-xs font-black text-slate-900">{stats.warehouseCount || 3} Nodes</span>
                         </div>
                       </div>
 
                       {/* Legend & Filter Pills */}
                       <div>
                         <div className="flex flex-wrap items-center justify-center gap-3 text-[10px] font-bold text-slate-600 mb-3">
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#ff3b00]" /> T-shirts</span>
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#14161a]" /> Hoodies</span>
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" /> Jeans</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#ff3b00]" /> Delhi</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#14161a]" /> Mumbai</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" /> Bengaluru</span>
                         </div>
                         <div className="flex bg-slate-100 p-1 rounded-full text-[10px] font-bold">
                           {(["All time", "Weekly", "Monthly"] as const).map((t) => (
@@ -814,13 +851,16 @@ export default function Store() {
 
                   </div>
 
-                  {/* MIDDLE ROW: MAIN VOLUME BAR CHART + REGIONAL LOAD */}
+                  {/* MIDDLE ROW: FLASH-SALE LOCK & ORDER VOLUME + REGIONAL LATENCY */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     
-                    {/* TOTAL ORDERS & FLASH SALE VOLUME CHART */}
+                    {/* TOTAL FLASH-SALE LOCK & ORDER VOLUME CHART */}
                     <div className="lg:col-span-2 bg-white rounded-3xl p-7 shadow-sm border border-slate-200/80 flex flex-col justify-between min-h-[360px]">
                       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-                        <div className="text-base font-bold text-slate-900">Total Orders</div>
+                        <div>
+                          <div className="text-base font-bold text-slate-900">Flash-Sale Lock & Order Volume</div>
+                          <div className="text-xs text-slate-400 font-medium">Atomic reservation lock throughput</div>
+                        </div>
                         
                         <div className="flex items-center gap-6">
                           <div className="flex items-center gap-4 text-xs font-bold text-slate-600">
@@ -831,7 +871,7 @@ export default function Store() {
                               <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${chartMetric === "Income" ? "border-slate-900" : "border-slate-300"}`}>
                                 {chartMetric === "Income" && <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
                               </span>
-                              Income
+                              Reserved Locks
                             </label>
                             <label 
                               onClick={() => setChartMetric("Profit")}
@@ -840,11 +880,15 @@ export default function Store() {
                               <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${chartMetric === "Profit" ? "border-slate-900" : "border-slate-300"}`}>
                                 {chartMetric === "Profit" && <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
                               </span>
-                              Profit
+                              Confirmed Orders
                             </label>
                           </div>
-                          <button className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition">
-                            <SlidersHorizontal className="w-3.5 h-3.5" />
+                          <button 
+                            onClick={() => fetchData(false)}
+                            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition"
+                            title="Sync live throughput"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
@@ -870,17 +914,17 @@ export default function Store() {
                             onMouseEnter={() => setActiveHoverBar(idx)}
                             className="flex flex-col items-center gap-2 group cursor-pointer relative"
                           >
-                            {/* Hover Tooltip Popup on June (or active) */}
+                            {/* Hover Tooltip Popup on active month */}
                             {activeHoverBar === idx && (
                               <motion.div 
                                 initial={{ opacity: 0, y: -6 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 className="absolute -top-16 z-20 bg-[#14161a] text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-xl whitespace-nowrap flex flex-col gap-0.5"
                               >
-                                <div className="text-slate-300">{col.m}, 09</div>
+                                <div className="text-slate-300">{col.m}, 2026 Peak</div>
                                 <div className="flex items-center gap-3">
-                                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-white" /> Sold 30</span>
-                                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#ff3b00]" /> Lock 15</span>
+                                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-white" /> Reserved 30</span>
+                                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#ff3b00]" /> Confirmed 15</span>
                                 </div>
                               </motion.div>
                             )}
@@ -913,25 +957,31 @@ export default function Store() {
                       </div>
                     </div>
 
-                    {/* SALES BY COUNTRY / WAREHOUSE GEO LOAD */}
+                    {/* WAREHOUSE CLUSTER LOAD & LATENCY */}
                     <div className="bg-white rounded-3xl p-7 shadow-sm border border-slate-200/80 flex flex-col justify-between min-h-[360px]">
                       <div className="flex justify-between items-center mb-4">
-                        <div className="text-base font-bold text-slate-900">Sales by country</div>
-                        <button className="text-slate-400 hover:text-slate-900 transition">
+                        <div>
+                          <div className="text-base font-bold text-slate-900">Node Cluster Latency</div>
+                          <div className="text-xs text-slate-400 font-medium">Distributed PostgreSQL lock latency</div>
+                        </div>
+                        <button 
+                          onClick={() => setCurrentView("Warehouses")}
+                          className="text-slate-400 hover:text-slate-900 transition"
+                        >
                           <ArrowUpRight className="w-4 h-4" />
                         </button>
                       </div>
 
-                      {/* Vertical Country Bars */}
+                      {/* Vertical Node Bars */}
                       <div className="flex items-end justify-between h-44 px-2 py-2">
                         {[
-                          { country: "USA", percent: "25%", h: "90%" },
-                          { country: "Japan", percent: "22%", h: "78%" },
-                          { country: "UK", percent: "20%", h: "70%" },
-                          { country: "Korea", percent: "18%", h: "62%" },
-                          { country: "Spain", percent: "15%", h: "52%" },
+                          { node: "Delhi", percent: "12ms", h: "90%" },
+                          { node: "Mumbai", percent: "18ms", h: "78%" },
+                          { node: "BLR", percent: "14ms", h: "70%" },
+                          { node: "HYD", percent: "16ms", h: "62%" },
+                          { node: "Chennai", percent: "22ms", h: "52%" },
                         ].map((c) => (
-                          <div key={c.country} className="flex flex-col items-center gap-2 group">
+                          <div key={c.node} className="flex flex-col items-center gap-2 group">
                             <span className="text-[10px] font-bold text-slate-500">{c.percent}</span>
                             <div className="w-6 md:w-7 bg-slate-100 h-32 rounded-lg flex items-end overflow-hidden">
                               <div 
@@ -939,12 +989,12 @@ export default function Store() {
                                 className="w-full bg-[#14161a] rounded-lg transition-all group-hover:bg-[#ff3b00]"
                               />
                             </div>
-                            <span className="text-[10px] font-bold text-slate-500 mt-1">{c.country}</span>
+                            <span className="text-[10px] font-bold text-slate-500 mt-1">{c.node}</span>
                           </div>
                         ))}
                       </div>
 
-                      {/* Country Filter Pills & Export CTA */}
+                      {/* Time Filter & Stress Test Trigger */}
                       <div className="space-y-4 pt-2">
                         <div className="flex bg-slate-100 p-1 rounded-full text-[10px] font-bold">
                           {(["All time", "Weekly", "Monthly"] as const).map((t) => (
@@ -974,12 +1024,12 @@ export default function Store() {
 
                   </div>
 
-                  {/* BOTTOM ROW: HIGH-DENSITY PRODUCT SALES TABLE */}
+                  {/* BOTTOM ROW: HIGH-DENSITY PRODUCT SALES & FLASH AVAILABILITY TABLE */}
                   <div className="bg-white rounded-3xl p-7 shadow-sm border border-slate-200/80">
                     <div className="flex justify-between items-center mb-6">
                       <div>
-                        <div className="text-base font-bold text-slate-900">Product sales</div>
-                        <div className="text-xs text-slate-400 font-medium">Real-time inventory locks & flash availability</div>
+                        <div className="text-base font-bold text-slate-900">Flash Catalog & Available Stock</div>
+                        <div className="text-xs text-slate-400 font-medium">Real-time atomic reservation locks & warehouse replenishment</div>
                       </div>
                       <button 
                         onClick={() => setCurrentView("Products")}
@@ -993,12 +1043,12 @@ export default function Store() {
                       <table className="w-full text-left border-collapse">
                         <thead>
                           <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider pb-3">
-                            <th className="pb-3 font-semibold">Item</th>
-                            <th className="pb-3 font-semibold text-center">Stock</th>
-                            <th className="pb-3 font-semibold text-center">Old price</th>
-                            <th className="pb-3 font-semibold text-center">Sale</th>
-                            <th className="pb-3 font-semibold text-center">New price</th>
-                            <th className="pb-3 font-semibold text-center">Items sold</th>
+                            <th className="pb-3 font-semibold">Product Item</th>
+                            <th className="pb-3 font-semibold text-center">Available Stock</th>
+                            <th className="pb-3 font-semibold text-center">Locked Units</th>
+                            <th className="pb-3 font-semibold text-center">Discount</th>
+                            <th className="pb-3 font-semibold text-center">Unit Price</th>
+                            <th className="pb-3 font-semibold text-center">Items Reserved</th>
                             <th className="pb-3 font-semibold text-right">Instant Action</th>
                           </tr>
                         </thead>
@@ -1022,17 +1072,17 @@ export default function Store() {
                                 </td>
                                 
                                 <td className="py-4 text-center">
-                                  <span className={`inline-block font-bold ${p.availableStock > 0 ? "text-slate-900" : "text-red-500 font-extrabold"}`}>
-                                    {p.availableStock}
+                                  <span className={`inline-block font-bold ${p.availableStock > 0 ? "text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100" : "text-red-500 font-extrabold bg-red-50 px-2 py-0.5 rounded-full"}`}>
+                                    {p.availableStock} Units
                                   </span>
                                 </td>
 
-                                <td className="py-4 text-center font-semibold text-slate-400 line-through">
-                                  ${p.oldPrice}
+                                <td className="py-4 text-center font-bold text-amber-600">
+                                  {p.reservedStock} Locked
                                 </td>
 
                                 <td className="py-4 text-center">
-                                  <span className="inline-block text-[10px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                                  <span className="inline-block text-[10px] font-black text-[#ff3b00] bg-orange-50 px-2 py-0.5 rounded-md border border-orange-100">
                                     {p.discount}
                                   </span>
                                 </td>
