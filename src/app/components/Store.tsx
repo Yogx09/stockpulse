@@ -275,15 +275,19 @@ export default function Store() {
         method: "POST",
         headers: { "Idempotency-Key": crypto.randomUUID() },
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showMessage("Order Confirmed Successfully!", false);
+        showMessage("Order Confirmed Successfully! 🎉", false);
         const updated = { ...target, status: "CONFIRMED" };
         setActiveReservation(null);
         setSelectedRes(updated);
+        setReservations(prev => prev.map(r => r.id === target.id ? { ...r, status: "CONFIRMED" } : r));
       } else {
-        showMessage("Confirmation Failed", true);
+        showMessage(data.error || "Reservation is no longer pending", true);
       }
       fetchData(true);
+    } catch {
+      showMessage("Network error", true);
     } finally {
       setProcessing(null);
     }
@@ -294,15 +298,23 @@ export default function Store() {
     if (!target) return;
     setProcessing("release");
     try {
-      await fetch(`/api/reservations/${target.id}/release`, {
+      const res = await fetch(`/api/reservations/${target.id}/release`, {
         method: "POST",
         headers: { "Idempotency-Key": crypto.randomUUID() },
       });
-      showMessage("Reservation released.", false);
-      const updated = { ...target, status: "RELEASED" };
-      setActiveReservation(null);
-      setSelectedRes(updated);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        showMessage("Reservation released.", false);
+        const updated = { ...target, status: "RELEASED" };
+        setActiveReservation(null);
+        setSelectedRes(updated);
+        setReservations(prev => prev.map(r => r.id === target.id ? { ...r, status: "RELEASED" } : r));
+      } else {
+        showMessage(data.error || "Could not release reservation", true);
+      }
       fetchData(true);
+    } catch {
+      showMessage("Network error", true);
     } finally {
       setProcessing(null);
     }
