@@ -76,21 +76,50 @@ export default function Store() {
     setTimeout(() => setToast(null), 5000);
   };
 
+  // Instant restoration from local cache to prevent 0-flash
+  useEffect(() => {
+    try {
+      const cachedProd = localStorage.getItem("stockpulse_products_cache");
+      if (cachedProd) setProducts(JSON.parse(cachedProd));
+      const cachedRes = localStorage.getItem("stockpulse_reservations_cache");
+      if (cachedRes) {
+        const parsed = JSON.parse(cachedRes);
+        setReservations(parsed);
+        if (parsed.length > 0 && !selectedRes) {
+          setSelectedRes(parsed[0]);
+        }
+      }
+    } catch {}
+  }, []);
+
   const fetchData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent && products.length === 0 && reservations.length === 0) {
+      setLoading(true);
+    }
     try {
       const [prodRes, resRes] = await Promise.all([
         fetch("/api/products"),
         fetch("/api/reservations")
       ]);
-      if (prodRes.ok) setProducts(await prodRes.json());
-      if (resRes.ok) setReservations(await resRes.json());
+      if (prodRes.ok) {
+        const prodData = await prodRes.json();
+        setProducts(prodData);
+        try { localStorage.setItem("stockpulse_products_cache", JSON.stringify(prodData)); } catch {}
+      }
+      if (resRes.ok) {
+        const resData = await resRes.json();
+        setReservations(resData);
+        try { localStorage.setItem("stockpulse_reservations_cache", JSON.stringify(resData)); } catch {}
+        if (resData.length > 0) {
+          setSelectedRes(prev => prev ? (resData.find((r: Reservation) => r.id === prev.id) || resData[0]) : resData[0]);
+        }
+      }
     } catch {
       if (!silent) showMessage("Error fetching data", true);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [products.length, reservations.length, selectedRes]);
 
   // WebSocket Live Real-time Connection
   useEffect(() => {
@@ -150,7 +179,7 @@ export default function Store() {
 
     connectWs();
 
-    const pollInterval = setInterval(() => fetchData(true), 8000);
+    const pollInterval = setInterval(() => fetchData(true), 15000);
     fetchData();
 
     return () => {
@@ -544,7 +573,9 @@ export default function Store() {
                       </div>
                       <div>
                         <div className="text-sm font-medium text-slate-400 mb-1">Total Products</div>
-                        <div className="text-2xl font-bold text-white">{stats.productCount}</div>
+                        <div className="text-2xl font-bold text-white">
+                          {loading && products.length === 0 ? <span className="inline-block w-10 h-7 bg-slate-800 animate-pulse rounded"></span> : stats.productCount}
+                        </div>
                       </div>
                     </div>
 
@@ -554,7 +585,9 @@ export default function Store() {
                       </div>
                       <div>
                         <div className="text-sm font-medium text-slate-400 mb-1">Active Reservations</div>
-                        <div className="text-2xl font-bold text-white">{stats.activeRes}</div>
+                        <div className="text-2xl font-bold text-white">
+                          {loading && reservations.length === 0 ? <span className="inline-block w-10 h-7 bg-slate-800 animate-pulse rounded"></span> : stats.activeRes}
+                        </div>
                       </div>
                     </div>
 
@@ -564,7 +597,9 @@ export default function Store() {
                       </div>
                       <div>
                         <div className="text-sm font-medium text-slate-400 mb-1">Warehouses</div>
-                        <div className="text-2xl font-bold text-white">{stats.warehouseCount}</div>
+                        <div className="text-2xl font-bold text-white">
+                          {loading && products.length === 0 ? <span className="inline-block w-10 h-7 bg-slate-800 animate-pulse rounded"></span> : stats.warehouseCount}
+                        </div>
                       </div>
                     </div>
 
@@ -574,7 +609,9 @@ export default function Store() {
                       </div>
                       <div>
                         <div className="text-sm font-medium text-slate-400 mb-1">Total Inventory</div>
-                        <div className="text-2xl font-bold text-white">{(stats.globalStock).toLocaleString()}</div>
+                        <div className="text-2xl font-bold text-white">
+                          {loading && products.length === 0 ? <span className="inline-block w-14 h-7 bg-slate-800 animate-pulse rounded"></span> : (stats.globalStock).toLocaleString()}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -789,7 +826,9 @@ export default function Store() {
                           </div>
                           <div className="text-xs font-semibold text-slate-400 leading-tight">{s.title}</div>
                         </div>
-                        <div className="text-2xl font-bold text-white mb-1">{s.val}</div>
+                        <div className="text-2xl font-bold text-white mb-1">
+                          {loading && reservations.length === 0 ? <span className="inline-block w-8 h-6 bg-slate-800 animate-pulse rounded"></span> : s.val}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -800,7 +839,18 @@ export default function Store() {
                         <h2 className="text-lg font-bold text-white">All Reservations</h2>
                       </div>
                       <div className="flex-1 overflow-y-auto">
-                        {reservations.length === 0 ? (
+                        {loading && reservations.length === 0 ? (
+                          <div className="space-y-4 p-4">
+                            {[1, 2, 3, 4, 5].map(k => (
+                              <div key={k} className="flex items-center gap-4 animate-pulse">
+                                <div className="w-8 h-8 rounded-md bg-slate-800" />
+                                <div className="h-4 bg-slate-800 rounded w-32" />
+                                <div className="h-4 bg-slate-800 rounded w-24 ml-auto" />
+                                <div className="h-4 bg-slate-800 rounded w-16" />
+                              </div>
+                            ))}
+                          </div>
+                        ) : reservations.length === 0 ? (
                            <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
                               <CalendarDays className="w-10 h-10 opacity-50" />
                               <p>No reservations found in database.</p>
