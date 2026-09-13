@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { differenceInSeconds, format } from "date-fns";
 import { 
   LayoutGrid, ShoppingBag, Tag, BarChart3, MessageSquare, Truck, Settings, LogOut,
@@ -159,12 +159,18 @@ export default function Store() {
     } catch {}
   }, []);
 
+  const fetchCounter = useRef(0);
+
   const fetchData = useCallback(async (silent = false) => {
+    const currentFetchId = ++fetchCounter.current;
     try {
       const [prodRes, resRes] = await Promise.all([
         fetch("/api/products"),
         fetch("/api/reservations")
       ]);
+      
+      if (currentFetchId !== fetchCounter.current) return;
+
       if (prodRes.ok) {
         const prodData = await prodRes.json();
         setProducts(prodData);
