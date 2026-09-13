@@ -73,6 +73,12 @@ export default function Store() {
   const [chartMetric, setChartMetric] = useState<"Income" | "Profit">("Income");
   const [activeHoverBar, setActiveHoverBar] = useState<number | null>(5); // Default to June hover
 
+  // Currency & Search & Drawer State
+  const [currency, setCurrency] = useState<"USD" | "EUR" | "GBP" | "INR">("USD");
+  const [currencyMenuOpen, setCurrencyMenuOpen] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [notificationDrawerOpen, setNotificationDrawerOpen] = useState<boolean>(false);
+
   // Real-time reservation state
   const [activeReservation, setActiveReservation] = useState<Reservation | null>(null);
   const [selectedRes, setSelectedRes] = useState<Reservation | null>(null);
@@ -101,6 +107,40 @@ export default function Store() {
   const showMessage = (msg: string, isError: boolean) => {
     setToast({ msg, isError, id: Date.now() });
     setTimeout(() => setToast(null), 5000);
+  };
+
+  const CURRENCIES = {
+    USD: { code: "USD" as const, symbol: "$", flag: "🇺🇸", rate: 1.0 },
+    EUR: { code: "EUR" as const, symbol: "€", flag: "🇪🇺", rate: 0.92 },
+    GBP: { code: "GBP" as const, symbol: "£", flag: "🇬🇧", rate: 0.78 },
+    INR: { code: "INR" as const, symbol: "₹", flag: "🇮🇳", rate: 83.5 },
+  };
+
+  const formatPrice = (val: number | string | undefined) => {
+    if (val === undefined || val === null) return "$0.00";
+    const num = typeof val === "string" ? parseFloat(val.replace(/[^0-9.-]+/g, "")) : val;
+    if (isNaN(num)) return "$0.00";
+    const curr = CURRENCIES[currency] || CURRENCIES.USD;
+    const converted = num * curr.rate;
+    return `${curr.symbol}${converted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  const exportCSV = () => {
+    const headers = "Product ID,Product Name,Warehouse,Total Stock,Reserved Stock,Available Stock,Price\n";
+    const rows = retailProducts.map(p => {
+      const inv = p.inventories[0];
+      return `"${p.id}","${p.name}","${inv?.warehouse?.name || 'Main Node'}",${p.totalStock},${p.reservedStock},${p.availableStock},"${p.newPrice}"`;
+    }).join("\n");
+    
+    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `stockpulse_inventory_${format(new Date(), "yyyyMMdd_HHmm")}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showMessage("📥 Inventory report CSV downloaded!", false);
   };
 
   // Instant restoration from local cache
@@ -467,6 +507,16 @@ export default function Store() {
 
   const displayRes = selectedRes || activeReservation || reservations[0];
 
+  const filteredRetailProducts = useMemo(() => {
+    if (!searchQuery.trim()) return retailProducts;
+    const q = searchQuery.toLowerCase();
+    return retailProducts.filter(p => 
+      p.name.toLowerCase().includes(q) || 
+      p.description.toLowerCase().includes(q) ||
+      p.inventories.some(i => i.warehouse.name.toLowerCase().includes(q) || i.warehouse.location.toLowerCase().includes(q))
+    );
+  }, [retailProducts, searchQuery]);
+
   // Render left vertical dock navigation
   const renderSidebar = () => {
     const navItems = [
@@ -550,10 +600,10 @@ export default function Store() {
   // Render Top Header matching reference
   const renderTopbar = () => {
     return (
-      <header className="h-20 bg-transparent px-6 md:px-10 flex items-center justify-between select-none">
+      <header className="h-20 bg-transparent px-6 md:px-10 flex items-center justify-between select-none relative z-40">
         <div>
           <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 leading-tight">
-            Retail Inventory
+            Stockpulse Inventory
           </h1>
           <p className="text-xs font-semibold text-slate-400">
             High-Concurrency Flash Reservation Engine
@@ -561,31 +611,71 @@ export default function Store() {
         </div>
 
         <div className="flex items-center gap-3 md:gap-4">
-          {/* Currency Pill */}
-          <div className="flex items-center gap-2 px-3.5 py-2 bg-white rounded-full border border-slate-200/80 shadow-xs text-xs font-bold text-slate-700 cursor-pointer hover:border-slate-300 transition">
-            <span className="text-sm">🇺🇸</span>
-            <span>USD</span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          {/* Live Search Input */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input 
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search products, nodes..."
+              className="pl-9 pr-8 py-2 bg-white border border-slate-200/80 rounded-full text-xs font-semibold text-slate-700 placeholder-slate-400 focus:outline-none focus:border-[#ff3b00] w-36 md:w-56 transition-all shadow-xs"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X className="w-3 h-3" />
+              </button>
+            )}
           </div>
 
-          {/* Search Pill */}
-          <button className="w-10 h-10 rounded-full bg-white border border-slate-200/80 shadow-xs flex items-center justify-center text-slate-600 hover:text-slate-900 hover:border-slate-300 transition">
-            <Search className="w-4 h-4" />
-          </button>
+          {/* Currency Dropdown Pill */}
+          <div className="relative">
+            <button 
+              onClick={() => setCurrencyMenuOpen(!currencyMenuOpen)}
+              className="flex items-center gap-2 px-3.5 py-2 bg-white rounded-full border border-slate-200/80 shadow-xs text-xs font-bold text-slate-700 hover:border-slate-300 transition cursor-pointer"
+            >
+              <span className="text-sm">{CURRENCIES[currency].flag}</span>
+              <span>{CURRENCIES[currency].code}</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
 
-          {/* Notification Pill */}
+            {currencyMenuOpen && (
+              <div className="absolute right-0 mt-2 w-32 bg-white rounded-2xl shadow-xl border border-slate-200/80 p-1.5 z-50">
+                {(Object.keys(CURRENCIES) as Array<keyof typeof CURRENCIES>).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => {
+                      setCurrency(c);
+                      setCurrencyMenuOpen(false);
+                      showMessage(`💱 Currency switched to ${c}`, false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition ${currency === c ? 'bg-orange-50 text-[#ff3b00]' : 'hover:bg-slate-50 text-slate-700'}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>{CURRENCIES[c].flag}</span>
+                      <span>{c}</span>
+                    </span>
+                    <span className="font-mono text-slate-400">{CURRENCIES[c].symbol}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Notification Bell with Drawer Trigger */}
           <button 
-            onClick={() => setCurrentView("Realtime")}
+            onClick={() => setNotificationDrawerOpen(!notificationDrawerOpen)}
             className="relative w-10 h-10 rounded-full bg-white border border-slate-200/80 shadow-xs flex items-center justify-center text-slate-600 hover:text-slate-900 hover:border-slate-300 transition"
+            title="Live Event Stream"
           >
             <Bell className="w-4 h-4" />
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#14161a] text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-white">
-              {eventLogs.length > 0 ? Math.min(9, eventLogs.length) : 2}
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#ff3b00] text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-white">
+              {eventLogs.length > 0 ? Math.min(9, eventLogs.length) : 3}
             </span>
           </button>
 
           {/* User Profile Avatar */}
-          <div className="flex items-center gap-2 pl-2">
+          <div className="flex items-center gap-2 pl-1">
             <div className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-md">
               <img 
                 src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80" 
@@ -859,32 +949,35 @@ export default function Store() {
                       <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
                         <div>
                           <div className="text-base font-bold text-slate-900">Flash-Sale Lock & Order Volume</div>
-                          <div className="text-xs text-slate-400 font-medium">Atomic reservation lock throughput</div>
+                          <div className="text-xs text-slate-400 font-medium">Atomic reservation lock throughput ({chartMetric === "Income" ? "Reserved Locks" : "Confirmed Orders"})</div>
                         </div>
                         
                         <div className="flex items-center gap-6">
                           <div className="flex items-center gap-4 text-xs font-bold text-slate-600">
-                            <label 
+                            <button 
                               onClick={() => setChartMetric("Income")}
-                              className="flex items-center gap-1.5 cursor-pointer"
+                              className={`flex items-center gap-1.5 transition ${chartMetric === "Income" ? "text-slate-900 font-black" : "text-slate-400 hover:text-slate-700"}`}
                             >
                               <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${chartMetric === "Income" ? "border-slate-900" : "border-slate-300"}`}>
                                 {chartMetric === "Income" && <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
                               </span>
                               Reserved Locks
-                            </label>
-                            <label 
+                            </button>
+                            <button 
                               onClick={() => setChartMetric("Profit")}
-                              className="flex items-center gap-1.5 cursor-pointer"
+                              className={`flex items-center gap-1.5 transition ${chartMetric === "Profit" ? "text-[#ff3b00] font-black" : "text-slate-400 hover:text-slate-700"}`}
                             >
-                              <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${chartMetric === "Profit" ? "border-slate-900" : "border-slate-300"}`}>
-                                {chartMetric === "Profit" && <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
+                              <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${chartMetric === "Profit" ? "border-[#ff3b00]" : "border-slate-300"}`}>
+                                {chartMetric === "Profit" && <span className="w-1.5 h-1.5 rounded-full bg-[#ff3b00]" />}
                               </span>
                               Confirmed Orders
-                            </label>
+                            </button>
                           </div>
                           <button 
-                            onClick={() => fetchData(false)}
+                            onClick={() => {
+                              fetchData(false);
+                              showMessage("🔄 Synced latest throughput metrics", false);
+                            }}
                             className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition"
                             title="Sync live throughput"
                           >
@@ -896,64 +989,71 @@ export default function Store() {
                       {/* 12-Month Interactive Bar Chart */}
                       <div className="relative flex-1 flex items-end justify-between pt-10 pb-4 px-2">
                         {[
-                          { m: "Jan", hSolid: 55, hStripe: 25, isSpecial: false },
-                          { m: "Feb", hSolid: 40, hStripe: 30, isSpecial: false },
-                          { m: "Mar", hSolid: 60, hStripe: 25, isSpecial: false },
-                          { m: "Apr", hSolid: 45, hStripe: 30, isSpecial: false },
-                          { m: "May", hSolid: 50, hStripe: 20, isSpecial: false },
-                          { m: "Jun", hSolid: 75, hStripe: 25, isSpecial: true }, // Special active orange
-                          { m: "Jul", hSolid: 60, hStripe: 20, isSpecial: false },
-                          { m: "Aug", hSolid: 35, hStripe: 25, isSpecial: false },
-                          { m: "Sep", hSolid: 50, hStripe: 30, isSpecial: false },
-                          { m: "Oct", hSolid: 70, hStripe: 20, isSpecial: false },
-                          { m: "Nov", hSolid: 65, hStripe: 15, isSpecial: false },
-                          { m: "Dec", hSolid: 40, hStripe: 30, isSpecial: false },
-                        ].map((col, idx) => (
-                          <div 
-                            key={col.m} 
-                            onMouseEnter={() => setActiveHoverBar(idx)}
-                            className="flex flex-col items-center gap-2 group cursor-pointer relative"
-                          >
-                            {/* Hover Tooltip Popup on active month */}
-                            {activeHoverBar === idx && (
-                              <motion.div 
-                                initial={{ opacity: 0, y: -6 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="absolute -top-16 z-20 bg-[#14161a] text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-xl whitespace-nowrap flex flex-col gap-0.5"
-                              >
-                                <div className="text-slate-300">{col.m}, 2026 Peak</div>
-                                <div className="flex items-center gap-3">
-                                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-white" /> Reserved 30</span>
-                                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#ff3b00]" /> Confirmed 15</span>
-                                </div>
-                              </motion.div>
-                            )}
+                          { m: "Jan", reserved: 55, confirmed: 45, hStripe: 25 },
+                          { m: "Feb", reserved: 40, confirmed: 35, hStripe: 30 },
+                          { m: "Mar", reserved: 60, confirmed: 50, hStripe: 25 },
+                          { m: "Apr", reserved: 45, confirmed: 40, hStripe: 30 },
+                          { m: "May", reserved: 50, confirmed: 42, hStripe: 20 },
+                          { m: "Jun", reserved: 75, confirmed: 68, hStripe: 25, isSpecial: true },
+                          { m: "Jul", reserved: 60, confirmed: 55, hStripe: 20 },
+                          { m: "Aug", reserved: 35, confirmed: 30, hStripe: 25 },
+                          { m: "Sep", reserved: 50, confirmed: 46, hStripe: 30 },
+                          { m: "Oct", reserved: 70, confirmed: 62, hStripe: 20 },
+                          { m: "Nov", reserved: 65, confirmed: 58, hStripe: 15 },
+                          { m: "Dec", reserved: 40, confirmed: 38, hStripe: 30 },
+                        ].map((col, idx) => {
+                          const val = chartMetric === "Income" ? col.reserved : col.confirmed;
+                          const barHeight = Math.min(85, Math.max(20, val));
+                          const isSpecial = col.isSpecial;
 
-                            {/* Bar Stack */}
-                            <div className="w-7 md:w-9 flex flex-col justify-end h-48 rounded-lg overflow-hidden transition-all duration-300 group-hover:scale-105">
-                              {/* Striped Pattern Header Bar */}
-                              <div 
-                                style={{ height: `${col.hStripe}%` }} 
-                                className="w-full bg-pattern-stripes border border-slate-300/40 rounded-t-sm"
-                              />
-                              {/* Solid Bottom Bar */}
-                              <div 
-                                style={{ height: `${col.hSolid}%` }} 
-                                className={`w-full transition-colors ${col.isSpecial ? "bg-[#ff3b00]" : "bg-[#14161a]"}`}
-                              >
-                                {col.isSpecial && (
-                                  <div className="w-full h-full flex items-center justify-center text-[9px] font-black text-white">
-                                    25%
+                          return (
+                            <div 
+                              key={col.m} 
+                              onMouseEnter={() => setActiveHoverBar(idx)}
+                              onClick={() => setActiveHoverBar(idx)}
+                              className="flex flex-col items-center gap-2 group cursor-pointer relative"
+                            >
+                              {/* Hover Tooltip Popup on active month */}
+                              {activeHoverBar === idx && (
+                                <motion.div 
+                                  initial={{ opacity: 0, y: -6 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="absolute -top-16 z-20 bg-[#14161a] text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-xl whitespace-nowrap flex flex-col gap-0.5"
+                                >
+                                  <div className="text-slate-300">{col.m}, 2026 Volume</div>
+                                  <div className="flex items-center gap-3">
+                                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-white" /> Reserved: {col.reserved}k</span>
+                                    <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#ff3b00]" /> Confirmed: {col.confirmed}k</span>
                                   </div>
-                                )}
-                              </div>
-                            </div>
+                                </motion.div>
+                              )}
 
-                            <span className="text-[11px] font-bold text-slate-500 group-hover:text-slate-900 transition-colors">
-                              {col.m}
-                            </span>
-                          </div>
-                        ))}
+                              {/* Bar Stack */}
+                              <div className="w-7 md:w-9 flex flex-col justify-end h-48 rounded-lg overflow-hidden transition-all duration-300 group-hover:scale-105">
+                                {/* Striped Pattern Header Bar */}
+                                <div 
+                                  style={{ height: `${col.hStripe}%` }} 
+                                  className="w-full bg-pattern-stripes border border-slate-300/40 rounded-t-sm"
+                                />
+                                {/* Solid Bottom Bar */}
+                                <div 
+                                  style={{ height: `${barHeight}%` }} 
+                                  className={`w-full transition-colors ${chartMetric === "Profit" ? "bg-[#ff3b00]" : (isSpecial ? "bg-[#ff3b00]" : "bg-[#14161a]")}`}
+                                >
+                                  {isSpecial && (
+                                    <div className="w-full h-full flex items-center justify-center text-[9px] font-black text-white">
+                                      {val}%
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <span className={`text-[11px] font-bold transition-colors ${activeHoverBar === idx ? "text-[#ff3b00]" : "text-slate-500 group-hover:text-slate-900"}`}>
+                                {col.m}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -962,11 +1062,12 @@ export default function Store() {
                       <div className="flex justify-between items-center mb-4">
                         <div>
                           <div className="text-base font-bold text-slate-900">Node Cluster Latency</div>
-                          <div className="text-xs text-slate-400 font-medium">Distributed PostgreSQL lock latency</div>
+                          <div className="text-xs text-slate-400 font-medium">PostgreSQL lock latency ({countryTimeFilter})</div>
                         </div>
                         <button 
                           onClick={() => setCurrentView("Warehouses")}
                           className="text-slate-400 hover:text-slate-900 transition"
+                          title="View all warehouses"
                         >
                           <ArrowUpRight className="w-4 h-4" />
                         </button>
@@ -974,24 +1075,29 @@ export default function Store() {
 
                       {/* Vertical Node Bars */}
                       <div className="flex items-end justify-between h-44 px-2 py-2">
-                        {[
-                          { node: "Delhi", percent: "12ms", h: "90%" },
-                          { node: "Mumbai", percent: "18ms", h: "78%" },
-                          { node: "BLR", percent: "14ms", h: "70%" },
-                          { node: "HYD", percent: "16ms", h: "62%" },
-                          { node: "Chennai", percent: "22ms", h: "52%" },
-                        ].map((c) => (
-                          <div key={c.node} className="flex flex-col items-center gap-2 group">
-                            <span className="text-[10px] font-bold text-slate-500">{c.percent}</span>
-                            <div className="w-6 md:w-7 bg-slate-100 h-32 rounded-lg flex items-end overflow-hidden">
-                              <div 
-                                style={{ height: c.h }} 
-                                className="w-full bg-[#14161a] rounded-lg transition-all group-hover:bg-[#ff3b00]"
-                              />
+                        {(() => {
+                          const multiplier = countryTimeFilter === "Weekly" ? 0.75 : countryTimeFilter === "Monthly" ? 1.2 : 1.0;
+                          const nodes = [
+                            { node: "Delhi", ms: Math.round(12 * multiplier), h: `${Math.min(95, Math.round(90 * (1 / multiplier)))}%` },
+                            { node: "Mumbai", ms: Math.round(18 * multiplier), h: `${Math.min(95, Math.round(78 * (1 / multiplier)))}%` },
+                            { node: "BLR", ms: Math.round(14 * multiplier), h: `${Math.min(95, Math.round(70 * (1 / multiplier)))}%` },
+                            { node: "HYD", ms: Math.round(16 * multiplier), h: `${Math.min(95, Math.round(62 * (1 / multiplier)))}%` },
+                            { node: "Chennai", ms: Math.round(22 * multiplier), h: `${Math.min(95, Math.round(52 * (1 / multiplier)))}%` },
+                          ];
+
+                          return nodes.map((c) => (
+                            <div key={c.node} className="flex flex-col items-center gap-2 group cursor-pointer" onClick={() => showMessage(`⚡ ${c.node} Node avg response: ${c.ms}ms`, false)}>
+                              <span className="text-[10px] font-bold text-slate-500 group-hover:text-[#ff3b00]">{c.ms}ms</span>
+                              <div className="w-6 md:w-7 bg-slate-100 h-32 rounded-lg flex items-end overflow-hidden">
+                                <div 
+                                  style={{ height: c.h }} 
+                                  className="w-full bg-[#14161a] rounded-lg transition-all group-hover:bg-[#ff3b00]"
+                                />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-500 mt-1">{c.node}</span>
                             </div>
-                            <span className="text-[10px] font-bold text-slate-500 mt-1">{c.node}</span>
-                          </div>
-                        ))}
+                          ));
+                        })()}
                       </div>
 
                       {/* Time Filter & Stress Test Trigger */}
@@ -1000,7 +1106,10 @@ export default function Store() {
                           {(["All time", "Weekly", "Monthly"] as const).map((t) => (
                             <button
                               key={t}
-                              onClick={() => setCountryTimeFilter(t)}
+                              onClick={() => {
+                                setCountryTimeFilter(t);
+                                showMessage(`Filter updated: ${t}`, false);
+                              }}
                               className={`flex-1 py-1.5 rounded-full transition-all ${
                                 countryTimeFilter === t
                                   ? "bg-[#ff3b00] text-white shadow-xs"
@@ -1026,17 +1135,27 @@ export default function Store() {
 
                   {/* BOTTOM ROW: HIGH-DENSITY PRODUCT SALES & FLASH AVAILABILITY TABLE */}
                   <div className="bg-white rounded-3xl p-7 shadow-sm border border-slate-200/80">
-                    <div className="flex justify-between items-center mb-6">
+                    <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
                       <div>
                         <div className="text-base font-bold text-slate-900">Flash Catalog & Available Stock</div>
                         <div className="text-xs text-slate-400 font-medium">Real-time atomic reservation locks & warehouse replenishment</div>
                       </div>
-                      <button 
-                        onClick={() => setCurrentView("Products")}
-                        className="text-slate-400 hover:text-slate-900 transition flex items-center gap-1 text-xs font-bold"
-                      >
-                        View all <ArrowUpRight className="w-4 h-4" />
-                      </button>
+                      
+                      <div className="flex items-center gap-3">
+                        <button 
+                          onClick={exportCSV}
+                          className="px-3.5 py-1.5 rounded-xl border border-slate-200 text-slate-700 hover:text-slate-900 hover:bg-slate-50 text-xs font-bold flex items-center gap-1.5 transition shadow-2xs"
+                        >
+                          <Download className="w-3.5 h-3.5 text-slate-500" /> Export CSV
+                        </button>
+
+                        <button 
+                          onClick={() => setCurrentView("Products")}
+                          className="px-3.5 py-1.5 rounded-xl bg-[#14161a] text-white hover:bg-black text-xs font-bold flex items-center gap-1 transition shadow-xs"
+                        >
+                          View Full Catalog <ArrowUpRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="overflow-x-auto">
@@ -1047,79 +1166,87 @@ export default function Store() {
                             <th className="pb-3 font-semibold text-center">Available Stock</th>
                             <th className="pb-3 font-semibold text-center">Locked Units</th>
                             <th className="pb-3 font-semibold text-center">Discount</th>
-                            <th className="pb-3 font-semibold text-center">Unit Price</th>
-                            <th className="pb-3 font-semibold text-center">Items Reserved</th>
+                            <th className="pb-3 font-semibold text-center">Price ({CURRENCIES[currency].code})</th>
+                            <th className="pb-3 font-semibold text-center">Total Locked</th>
                             <th className="pb-3 font-semibold text-right">Instant Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                          {retailProducts.map((p) => {
-                            const firstInv = p.inventories[0];
-                            const isProc = processing === firstInv?.id;
+                          {filteredRetailProducts.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="py-12 text-center text-slate-400">
+                                No products found matching &quot;{searchQuery}&quot;.
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredRetailProducts.map((p) => {
+                              const firstInv = p.inventories[0];
+                              const isProc = processing === firstInv?.id;
 
-                            return (
-                              <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
-                                <td className="py-4">
-                                  <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0 border border-slate-200/60">
-                                      <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                              return (
+                                <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
+                                  <td className="py-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0 border border-slate-200/60">
+                                        <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                                      </div>
+                                      <div>
+                                        <div className="font-bold text-slate-900">{p.name}</div>
+                                        <div className="text-[11px] text-slate-400">{firstInv?.warehouse?.name || "Main Node"}</div>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <div className="font-bold text-slate-900">{p.name}</div>
-                                      <div className="text-[11px] text-slate-400">{firstInv?.warehouse?.name || "Main Node"}</div>
+                                  </td>
+                                  
+                                  <td className="py-4 text-center">
+                                    <span className={`inline-block font-bold ${p.availableStock > 0 ? "text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100" : "text-red-500 font-extrabold bg-red-50 px-2 py-0.5 rounded-full"}`}>
+                                      {p.availableStock} Units
+                                    </span>
+                                  </td>
+
+                                  <td className="py-4 text-center font-bold text-amber-600">
+                                    {p.reservedStock} Locked
+                                  </td>
+
+                                  <td className="py-4 text-center">
+                                    <span className="inline-block text-[10px] font-black text-[#ff3b00] bg-orange-50 px-2 py-0.5 rounded-md border border-orange-100">
+                                      {p.discount}
+                                    </span>
+                                  </td>
+
+                                  <td className="py-4 text-center font-bold text-slate-900">
+                                    {formatPrice(p.newPrice)}
+                                  </td>
+
+                                  <td className="py-4 text-center font-semibold text-slate-600">
+                                    {p.itemsSold}
+                                  </td>
+
+                                  <td className="py-4 text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                      <button
+                                        onClick={() => {
+                                          setRestockInvId(firstInv?.id);
+                                          setRestockItemName(p.name);
+                                          setRestockModalOpen(true);
+                                        }}
+                                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-[11px] font-bold transition"
+                                      >
+                                        Restock
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleReserve(p, firstInv?.id, firstInv?.availableStock)}
+                                        disabled={isProc || firstInv?.availableStock <= 0}
+                                        className="px-3.5 py-1.5 rounded-lg bg-[#ff3b00] hover:bg-[#e03400] text-white text-[11px] font-bold transition shadow-sm shadow-[#ff3b00]/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                                      >
+                                        {isProc ? <Loader2 className="w-3 h-3 animate-spin" /> : "⚡ Lock 10m"}
+                                      </button>
                                     </div>
-                                  </div>
-                                </td>
-                                
-                                <td className="py-4 text-center">
-                                  <span className={`inline-block font-bold ${p.availableStock > 0 ? "text-emerald-600 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100" : "text-red-500 font-extrabold bg-red-50 px-2 py-0.5 rounded-full"}`}>
-                                    {p.availableStock} Units
-                                  </span>
-                                </td>
-
-                                <td className="py-4 text-center font-bold text-amber-600">
-                                  {p.reservedStock} Locked
-                                </td>
-
-                                <td className="py-4 text-center">
-                                  <span className="inline-block text-[10px] font-black text-[#ff3b00] bg-orange-50 px-2 py-0.5 rounded-md border border-orange-100">
-                                    {p.discount}
-                                  </span>
-                                </td>
-
-                                <td className="py-4 text-center font-bold text-slate-900">
-                                  ${p.newPrice}
-                                </td>
-
-                                <td className="py-4 text-center font-semibold text-slate-600">
-                                  {p.itemsSold}
-                                </td>
-
-                                <td className="py-4 text-right">
-                                  <div className="flex items-center justify-end gap-2">
-                                    <button
-                                      onClick={() => {
-                                        setRestockInvId(firstInv?.id);
-                                        setRestockItemName(p.name);
-                                        setRestockModalOpen(true);
-                                      }}
-                                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-[11px] font-bold transition"
-                                    >
-                                      Restock
-                                    </button>
-
-                                    <button
-                                      onClick={() => handleReserve(p, firstInv?.id, firstInv?.availableStock)}
-                                      disabled={isProc || firstInv?.availableStock <= 0}
-                                      className="px-3.5 py-1.5 rounded-lg bg-[#ff3b00] hover:bg-[#e03400] text-white text-[11px] font-bold transition shadow-sm shadow-[#ff3b00]/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-                                    >
-                                      {isProc ? <Loader2 className="w-3 h-3 animate-spin" /> : "⚡ Lock 10m"}
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -1133,31 +1260,42 @@ export default function Store() {
             {currentView === "Products" && (
               <AnimatePresence mode="wait">
                 <motion.div key="prods" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-wrap justify-between items-center gap-4">
                     <div>
                       <h2 className="text-2xl font-black text-slate-900">Product Catalog</h2>
-                      <p className="text-xs text-slate-400 font-medium">Distributed warehouse node allocation</p>
+                      <p className="text-xs text-slate-400 font-medium">Distributed warehouse node allocation & instant stock locks</p>
                     </div>
-                    <button 
-                      onClick={() => setSimModalOpen(true)}
-                      className="px-4 py-2 rounded-2xl bg-[#ff3b00] text-white text-xs font-bold shadow-lg shadow-[#ff3b00]/20 flex items-center gap-2 hover:bg-[#e03400] transition"
-                    >
-                      <Zap className="w-4 h-4" /> Concurrency Test
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={exportCSV}
+                        className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-700 text-xs font-bold shadow-xs hover:bg-slate-50 transition flex items-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Export Data
+                      </button>
+                      <button 
+                        onClick={() => setSimModalOpen(true)}
+                        className="px-4 py-2 rounded-2xl bg-[#ff3b00] text-white text-xs font-bold shadow-lg shadow-[#ff3b00]/20 flex items-center gap-2 hover:bg-[#e03400] transition"
+                      >
+                        <Zap className="w-4 h-4" /> Concurrency Test
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {retailProducts.map((p) => {
+                    {filteredRetailProducts.map((p) => {
                       const firstInv = p.inventories[0];
                       const isProc = processing === firstInv?.id;
 
                       return (
                         <div key={p.id} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col justify-between">
                           <div>
-                            <div className="w-full h-44 rounded-2xl bg-slate-100 overflow-hidden mb-4 border border-slate-100 relative">
+                            <div className="w-full h-48 rounded-2xl bg-slate-100 overflow-hidden mb-4 border border-slate-100 relative">
                               <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
-                              <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm text-slate-900 font-black text-xs px-2.5 py-1 rounded-full shadow-xs">
-                                ${p.newPrice}
+                              <span className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm text-slate-900 font-black text-xs px-3 py-1 rounded-full shadow-xs border border-slate-200/60">
+                                {formatPrice(p.newPrice)}
+                              </span>
+                              <span className="absolute top-3 left-3 bg-[#ff3b00] text-white font-black text-[10px] px-2.5 py-0.5 rounded-full shadow-xs">
+                                {p.discount} OFF
                               </span>
                             </div>
                             <h3 className="font-bold text-base text-slate-900 mb-1">{p.name}</h3>
@@ -1166,8 +1304,8 @@ export default function Store() {
 
                           <div className="space-y-3 pt-3 border-t border-slate-100">
                             <div className="flex justify-between text-xs">
-                              <span className="text-slate-400 font-semibold">Available Units</span>
-                              <span className="font-black text-slate-900">{p.availableStock} / {p.totalStock}</span>
+                              <span className="text-slate-400 font-semibold">Node Availability</span>
+                              <span className="font-black text-slate-900">{p.availableStock} / {p.totalStock} units</span>
                             </div>
                             <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                               <div 
@@ -1175,13 +1313,25 @@ export default function Store() {
                                 className="bg-[#ff3b00] h-full rounded-full transition-all"
                               />
                             </div>
-                            <button
-                              onClick={() => handleReserve(p, firstInv?.id, firstInv?.availableStock)}
-                              disabled={isProc || firstInv?.availableStock <= 0}
-                              className="w-full py-2.5 rounded-xl bg-[#14161a] hover:bg-black text-white text-xs font-bold transition flex items-center justify-center gap-2 disabled:opacity-40"
-                            >
-                              {isProc ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "⚡ Reserve Flash Lock"}
-                            </button>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  setRestockInvId(firstInv?.id);
+                                  setRestockItemName(p.name);
+                                  setRestockModalOpen(true);
+                                }}
+                                className="px-3 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition"
+                              >
+                                Restock
+                              </button>
+                              <button
+                                onClick={() => handleReserve(p, firstInv?.id, firstInv?.availableStock)}
+                                disabled={isProc || firstInv?.availableStock <= 0}
+                                className="flex-1 py-2.5 rounded-xl bg-[#14161a] hover:bg-black text-white text-xs font-bold transition flex items-center justify-center gap-2 disabled:opacity-40"
+                              >
+                                {isProc ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "⚡ Reserve Flash Lock"}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -1427,7 +1577,10 @@ export default function Store() {
                         <span>Live Broadcast Stream</span>
                       </div>
                       <button 
-                        onClick={() => setEventLogs([])}
+                        onClick={() => {
+                          setEventLogs([]);
+                          showMessage("Terminal stream cleared", false);
+                        }}
                         className="text-[10px] text-slate-400 hover:text-white transition"
                       >
                         Clear Terminal
@@ -1455,45 +1608,138 @@ export default function Store() {
             )}
 
             {/* VIEW: WAREHOUSES & ANALYTICS */}
-            {(currentView === "Warehouses" || currentView === "Analytics") && (
+            {currentView === "Warehouses" && (
               <AnimatePresence mode="wait">
                 <motion.div key="wh" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
                   <div className="flex justify-between items-center">
                     <div>
-                      <h2 className="text-2xl font-black text-slate-900">{currentView === "Warehouses" ? "Warehouse Nodes" : "Advanced Analytics"}</h2>
-                      <p className="text-xs text-slate-400 font-medium">Cluster inventory distribution</p>
+                      <h2 className="text-2xl font-black text-slate-900">Warehouse Nodes</h2>
+                      <p className="text-xs text-slate-400 font-medium">Cluster inventory distribution and local fulfillment latency</p>
                     </div>
+                    <button 
+                      onClick={() => setSimModalOpen(true)}
+                      className="px-4 py-2 rounded-2xl bg-[#ff3b00] text-white text-xs font-bold shadow-lg shadow-[#ff3b00]/20 flex items-center gap-2 hover:bg-[#e03400] transition"
+                    >
+                      <Zap className="w-4 h-4" /> Cluster Stress Test
+                    </button>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {stats.warehouses.map((wh: any) => (
-                      <div key={wh.name} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
-                        <div className="flex items-center gap-3 mb-4">
-                          <div className="w-10 h-10 rounded-xl bg-[#ff3b00]/10 text-[#ff3b00] flex items-center justify-center font-bold">
-                            <Truck className="w-5 h-5" />
+                      <div key={wh.name} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-[#ff3b00]/10 text-[#ff3b00] flex items-center justify-center font-bold">
+                                <Truck className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <div className="font-bold text-slate-900">{wh.name}</div>
+                                <div className="text-[11px] text-slate-400">{wh.location}</div>
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                              Healthy
+                            </span>
                           </div>
-                          <div>
-                            <div className="font-bold text-slate-900">{wh.name}</div>
-                            <div className="text-[11px] text-slate-400">{wh.location}</div>
+
+                          <div className="space-y-2 text-xs font-semibold text-slate-600 my-4">
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Total Stock</span>
+                              <span className="text-slate-900 font-black">{wh.totalStock} units</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Reserved Locks</span>
+                              <span className="text-[#ff3b00] font-black">{wh.reservedStock}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-slate-400">Available</span>
+                              <span className="text-emerald-600 font-black">{wh.availableStock}</span>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="space-y-2 text-xs font-semibold text-slate-600">
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">Total Stock</span>
-                            <span className="text-slate-900">{wh.totalStock}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">Reserved Locks</span>
-                            <span className="text-[#ff3b00]">{wh.reservedStock}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">Available</span>
-                            <span className="text-emerald-600">{wh.availableStock}</span>
-                          </div>
-                        </div>
+                        <button 
+                          onClick={() => {
+                            setRestockInvId(wh.id || "inv_1");
+                            setRestockItemName(`${wh.name} Inventory`);
+                            setRestockModalOpen(true);
+                          }}
+                          className="w-full py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center justify-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Restock Warehouse
+                        </button>
                       </div>
                     ))}
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            )}
+
+            {/* VIEW: ANALYTICS */}
+            {currentView === "Analytics" && (
+              <AnimatePresence mode="wait">
+                <motion.div key="analytics" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-900">Advanced Analytics & Performance</h2>
+                      <p className="text-xs text-slate-400 font-medium">Flash-sale metrics, conversion velocities, and node throughput</p>
+                    </div>
+                    <button 
+                      onClick={exportCSV}
+                      className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-800 text-xs font-bold shadow-xs hover:bg-slate-50 transition flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Export Analytics Report
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
+                      <div className="text-xs font-semibold text-slate-400 mb-1">Lock-to-Order Conversion</div>
+                      <div className="text-2xl font-black text-slate-900">
+                        {stats.totalRes > 0 ? `${Math.round((stats.confirmed / stats.totalRes) * 100)}%` : "94.2%"}
+                      </div>
+                      <div className="text-[11px] text-emerald-600 font-semibold mt-1">↑ +4.8% vs last sale</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
+                      <div className="text-xs font-semibold text-slate-400 mb-1">Avg Lock Duration</div>
+                      <div className="text-2xl font-black text-slate-900">4m 18s</div>
+                      <div className="text-[11px] text-slate-400 font-semibold mt-1">TTL window: 10m limit</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
+                      <div className="text-xs font-semibold text-slate-400 mb-1">Zero-Oversell Rate</div>
+                      <div className="text-2xl font-black text-emerald-600">100.0%</div>
+                      <div className="text-[11px] text-emerald-600 font-semibold mt-1">0 concurrency violations</div>
+                    </div>
+
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
+                      <div className="text-xs font-semibold text-slate-400 mb-1">Mesh Cluster Latency</div>
+                      <div className="text-2xl font-black text-slate-900">14.2 ms</div>
+                      <div className="text-[11px] text-slate-400 font-semibold mt-1">p99 PostgreSQL locking</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-3xl p-7 shadow-sm border border-slate-200/80 space-y-4">
+                    <div className="font-bold text-slate-900 text-base">Cluster Efficiency Summary</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-slate-600">
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-1">
+                        <div className="text-slate-400 text-[11px]">Primary Redis Node</div>
+                        <div className="text-sm font-black text-slate-900">Redis In-Memory TTL Worker</div>
+                        <div className="text-[11px] text-emerald-600">100% Uptime • Expiry active</div>
+                      </div>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-1">
+                        <div className="text-slate-400 text-[11px]">PostgreSQL Transaction Isolation</div>
+                        <div className="text-sm font-black text-slate-900">Serializable / SELECT FOR UPDATE</div>
+                        <div className="text-[11px] text-emerald-600">Atomic inventory locking</div>
+                      </div>
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-1">
+                        <div className="text-slate-400 text-[11px]">API Gateway Reverse Proxy</div>
+                        <div className="text-sm font-black text-slate-900">Port 4000 Orchestrator</div>
+                        <div className="text-[11px] text-emerald-600">Health checks operational</div>
+                      </div>
+                    </div>
                   </div>
                 </motion.div>
               </AnimatePresence>
@@ -1502,6 +1748,85 @@ export default function Store() {
           </div>
         </div>
       </main>
+
+      {/* SLIDE-OVER NOTIFICATION EVENT DRAWER */}
+      <AnimatePresence>
+        {notificationDrawerOpen && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-xs">
+            <motion.div 
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="w-full max-w-md bg-white h-full shadow-2xl flex flex-col justify-between border-l border-slate-200/80 select-none"
+            >
+              {/* Drawer Header */}
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#ff3b00]/10 text-[#ff3b00] flex items-center justify-center font-bold">
+                    <Bell className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-base text-slate-900">Live Event Feed</h3>
+                    <p className="text-[11px] text-slate-400">Microservice audit logs & real-time events</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setNotificationDrawerOpen(false)}
+                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Drawer Event List */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-3">
+                {eventLogs.length === 0 ? (
+                  <div className="py-20 text-center text-slate-400 space-y-2">
+                    <Sparkles className="w-8 h-8 mx-auto text-slate-300" />
+                    <p className="text-xs font-semibold">No recent events yet.</p>
+                    <p className="text-[11px] text-slate-400">Reserve an item or run a concurrency test to see live events stream in.</p>
+                  </div>
+                ) : (
+                  eventLogs.map((log) => (
+                    <div key={log.id} className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 space-y-1 hover:border-slate-200 transition">
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="font-black text-[#ff3b00] bg-orange-50 px-2 py-0.5 rounded-md border border-orange-100">
+                          {log.type}
+                        </span>
+                        <span className="font-medium text-slate-400">{log.time}</span>
+                      </div>
+                      <div className="text-xs font-medium text-slate-700 break-words">{log.text}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Drawer Footer */}
+              <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex gap-2">
+                <button
+                  onClick={() => {
+                    setEventLogs([]);
+                    showMessage("Event feed cleared", false);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold transition"
+                >
+                  Clear Feed
+                </button>
+                <button
+                  onClick={() => {
+                    setNotificationDrawerOpen(false);
+                    setCurrentView("Realtime");
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-[#14161a] hover:bg-black text-white text-xs font-bold transition"
+                >
+                  Open Live Mesh
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* CONCURRENCY SIMULATION MODAL */}
       <AnimatePresence>
@@ -1536,9 +1861,19 @@ export default function Store() {
                     onChange={e => setSimInvId(e.target.value)}
                     className="w-full bg-white/10 border border-white/15 rounded-xl px-3.5 py-2.5 text-white font-bold focus:outline-none"
                   >
-                    <option value="inv_1" className="bg-slate-900">iPhone 15 Pro (Delhi Node)</option>
-                    <option value="inv_2" className="bg-slate-900">iPhone 15 Pro (Mumbai Node)</option>
-                    <option value="inv_3" className="bg-slate-900">MacBook Air M3 (Bengaluru Node)</option>
+                    {products.length > 0 ? (
+                      products.flatMap(p => p.inventories.map(inv => (
+                        <option key={inv.id} value={inv.id} className="bg-slate-900">
+                          {p.name} ({inv.warehouse.name} - Available: {inv.availableStock})
+                        </option>
+                      )))
+                    ) : (
+                      <>
+                        <option value="inv_1" className="bg-slate-900">iPhone 15 Pro (Delhi Node)</option>
+                        <option value="inv_2" className="bg-slate-900">iPhone 15 Pro (Mumbai Node)</option>
+                        <option value="inv_3" className="bg-slate-900">MacBook Air M3 (Bengaluru Node)</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
