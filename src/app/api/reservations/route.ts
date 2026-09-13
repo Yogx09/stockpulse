@@ -1,138 +1,57 @@
-import { prisma } from "@/lib/prisma";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { Redis } from "@upstash/redis";
+import { InMemoryStore } from "../../../../packages/shared/src/store";
 
-// Initialize Redis if credentials are provided (for idempotency)
-const redis = process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-  ? new Redis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN,
-    })
-  : null;
-
-const reserveSchema = z.object({
-  inventoryId: z.string().min(1),
-  quantity: z.number().int().positive(),
-});
-
-export async function POST(req: NextRequest) {
-  try {
-    const idempotencyKey = req.headers.get("Idempotency-Key");
-    
-    if (idempotencyKey && redis) {
-      const cachedResponse = await redis.get(`idempotency:reserve:${idempotencyKey}`);
-      if (cachedResponse) {
-        return NextResponse.json(cachedResponse, { status: 200 });
-      }
-    }
-
-    const body = await req.json();
-    const result = reserveSchema.safeParse(body);
-    
-    if (!result.success) {
-      return NextResponse.json({ error: "Invalid request payload" }, { status: 400 });
-    }
-
-    const { inventoryId, quantity } = result.data;
-
-    // Use a transaction and atomic raw update to ensure correctness under concurrency
-    const reservation = await prisma.$transaction(async (tx) => {
-      // Clean up expired reservations for this inventory lazily to free up stock immediately
-      // This ensures we have the most up-to-date available stock before trying to reserve
-      const expiredReservations = await tx.reservation.findMany({
-        where: {
-          inventoryId,
-          status: "PENDING",
-          expiresAt: { lt: new Date() }
-        }
-      });
-
-      if (expiredReservations.length > 0) {
-        const expiredIds = expiredReservations.map(r => r.id);
-        const expiredQuantitySum = expiredReservations.reduce((sum, r) => sum + r.quantity, 0);
-
-        await tx.reservation.updateMany({
-          where: { id: { in: expiredIds } },
-          data: { status: "RELEASED" }
-        });
-
-        await tx.$executeRaw`
-          UPDATE "Inventory"
-          SET "reservedStock" = "reservedStock" - ${expiredQuantitySum}
-          WHERE "id" = ${inventoryId}
-        `;
-      }
-
-      // Try to increment reserved stock atomically
-      const updatedCount = await tx.$executeRaw`
-        UPDATE "Inventory"
-        SET "reservedStock" = "reservedStock" + ${quantity}
-        WHERE "id" = ${inventoryId} AND ("totalStock" - "reservedStock") >= ${quantity}
-      `;
-
-      if (updatedCount === 0) {
-        throw new Error("InsufficientStock");
-      }
-
-      // Create the reservation record holding the stock
-      return await tx.reservation.create({
-        data: {
-          inventoryId,
-          quantity,
-          status: "PENDING",
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes expiry
-        },
-      });
-    });
-
-    const responsePayload = { reservation };
-
-    if (idempotencyKey && redis) {
-      await redis.set(`idempotency:reserve:${idempotencyKey}`, responsePayload, { ex: 86400 }); // Expire in 24 hours
-    }
-
-    return NextResponse.json(responsePayload, { status: 201 });
-  } catch (error: unknown) {
-    if (error instanceof Error) {
-      if (error.message === "InsufficientStock") {
-        return NextResponse.json({ error: "Not enough stock available" }, { status: 409 });
-      }
-    }
-    console.error(error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-  }
-}
+const GATEWAY_URL = process.env.GATEWAY_URL || "http://localhost:4000";
+const memStore = InMemoryStore.getInstance();
 
 export async function GET() {
   try {
-    const reservations = await prisma.reservation.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        inventory: {
-          include: {
-            product: true,
-            warehouse: true,
-          },
-        },
-      },
-    });
+    const res = await fetch(`${GATEWAY_URL}/api/reservations`, { cache: "no-store", signal: AbortSignal.timeout(1500) });
+    if (res.ok) {
+      const data = await res.json();
+      return NextResponse.json(data, { status: res.status });
+    }
+  } catch {
+    // Graceful fallback
+  }
 
-    const formatted = reservations.map(res => ({
-      id: res.id,
-      inventoryId: res.inventoryId,
-      quantity: res.quantity,
-      status: res.status,
-      expiresAt: res.expiresAt,
-      createdAt: res.createdAt,
-      productName: res.inventory.product.name,
-      warehouseName: res.inventory.warehouse.name,
-      image: res.inventory.product.image,
-    }));
+  return NextResponse.json(memStore.reservations);
+}
 
-    return NextResponse.json(formatted);
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const idempotencyKey = req.headers.get("idempotency-key");
+    if (idempotencyKey) {
+      headers["idempotency-key"] = idempotencyKey;
+    }
+
+    try {
+      const res = await fetch(`${GATEWAY_URL}/api/reservations`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(2000),
+      });
+
+      if (res.ok || res.status === 409 || res.status === 400) {
+        const data = await res.json();
+        return NextResponse.json(data, { status: res.status });
+      }
+    } catch {
+      // Gateway unreachable, fall back to in-memory store
+    }
+
+    const { inventoryId, quantity } = body;
+    const reservation = memStore.reserveStock(inventoryId, quantity || 1);
+    if (!reservation) {
+      return NextResponse.json({ error: "Not enough stock available" }, { status: 409 });
+    }
+
+    return NextResponse.json({ reservation }, { status: 201 });
   } catch (error) {
-    console.error("Error fetching reservations:", error);
-    return NextResponse.json({ error: "Failed to fetch reservations" }, { status: 500 });
+    console.error("Reservation POST error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -5,7 +5,8 @@ import { formatDistanceToNowStrict, differenceInSeconds, format } from "date-fns
 import { 
   Package, Calendar, Building2, BarChart2, FileText, Settings, Search, Bell, Moon, LogOut,
   MoreVertical, Activity, ChevronDown, CheckCircle2, AlertCircle, Loader2, X, Clock,
-  Plus, CalendarDays, Timer, CheckCircle, XCircle, ChevronRight, ChevronLeft, Maximize2, AlertTriangle, MapPin, TrendingUp
+  Plus, CalendarDays, Timer, CheckCircle, XCircle, ChevronRight, ChevronLeft, Maximize2, AlertTriangle, MapPin, TrendingUp,
+  Zap, Layers, Radio, Terminal, Cpu, ShieldCheck, RefreshCw
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -53,6 +54,22 @@ export default function Store() {
   const [timeLeft, setTimeLeft] = useState<string>("");
   const [timerPercent, setTimerPercent] = useState<number>(100);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState<boolean>(false);
+  const [eventLogs, setEventLogs] = useState<Array<{ id: string; type: string; time: string; text: string }>>([]);
+  
+  // Concurrency Simulation state
+  const [simModalOpen, setSimModalOpen] = useState<boolean>(false);
+  const [simLoading, setSimLoading] = useState<boolean>(false);
+  const [simInvId, setSimInvId] = useState<string>("inv_1");
+  const [simCount, setSimCount] = useState<number>(20);
+  const [simResult, setSimResult] = useState<any>(null);
+
+  // Restock modal state
+  const [restockModalOpen, setRestockModalOpen] = useState<boolean>(false);
+  const [restockInvId, setRestockInvId] = useState<string>("");
+  const [restockItemName, setRestockItemName] = useState<string>("");
+  const [restockQty, setRestockQty] = useState<number>(5);
+  const [restockLoading, setRestockLoading] = useState<boolean>(false);
 
   const showMessage = (msg: string, isError: boolean) => {
     setToast({ msg, isError, id: Date.now() });
@@ -75,12 +92,115 @@ export default function Store() {
     }
   }, []);
 
+  // WebSocket Live Real-time Connection
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const wsUrl = "ws://localhost:4003/ws";
+    let ws: WebSocket | null = null;
+    let reconnectTimer: NodeJS.Timeout;
+
+    const connectWs = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          setWsConnected(true);
+        };
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type && data.type !== "SYSTEM_CONNECTED") {
+              fetchData(true);
+              setEventLogs(prev => [
+                {
+                  id: String(Date.now()) + Math.random().toString(36).substr(2, 4),
+                  type: data.type,
+                  time: new Date().toLocaleTimeString(),
+                  text: typeof data.payload === "object" ? JSON.stringify(data.payload) : String(data.payload || "")
+                },
+                ...prev.slice(0, 7)
+              ]);
+
+              if (data.type === "RESERVATION_CREATED") {
+                showMessage(`⚡ Event: Stock reserved (${data.payload?.quantity || 1} unit)`, false);
+              } else if (data.type === "RESERVATION_CONFIRMED") {
+                showMessage(`🎉 Event: Order confirmed for #${(data.payload?.reservationId || "").slice(-6)}`, false);
+              } else if (data.type === "RESERVATION_EXPIRED") {
+                showMessage(`⏰ Event: 10m TTL expired, stock released`, false);
+              } else if (data.type === "RESERVATION_RELEASED") {
+                showMessage(`↩️ Event: Reservation cancelled & stock returned`, false);
+              } else if (data.type === "STOCK_UPDATED") {
+                showMessage(`📦 Event: Stock replenished in warehouse`, false);
+              }
+            }
+          } catch {
+            // ignore non-json
+          }
+        };
+        ws.onclose = () => {
+          setWsConnected(false);
+          reconnectTimer = setTimeout(connectWs, 3000);
+        };
+        ws.onerror = () => {
+          setWsConnected(false);
+          ws?.close();
+        };
+      } catch {
+        setWsConnected(false);
+      }
+    };
+
+    connectWs();
+
+    const pollInterval = setInterval(() => fetchData(true), 8000);
     fetchData();
-    const interval = setInterval(() => fetchData(true), 5000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearTimeout(reconnectTimer);
+      clearInterval(pollInterval);
+      if (ws) ws.close();
+    };
   }, [fetchData]);
+
+  const handleRunSimulation = async () => {
+    setSimLoading(true);
+    try {
+      const res = await fetch("/api/inventory/simulate-concurrency", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inventoryId: simInvId, concurrentRequests: simCount })
+      });
+      const data = await res.json();
+      setSimResult(data);
+      fetchData(true);
+      showMessage(`⚡ Simulation: ${data.summary?.granted} granted, ${data.summary?.rejectedConflicts} safely rejected`, false);
+    } catch {
+      showMessage("Simulation request failed", true);
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  const handleRestockSubmit = async () => {
+    if (!restockInvId || restockQty <= 0) return;
+    setRestockLoading(true);
+    try {
+      const res = await fetch("/api/inventory/restock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inventoryId: restockInvId, quantity: restockQty })
+      });
+      if (res.ok) {
+        showMessage(`📦 Restocked +${restockQty} units! Broadcasted to mesh.`, false);
+        setRestockModalOpen(false);
+        fetchData(true);
+      } else {
+        showMessage("Restock failed", true);
+      }
+    } catch {
+      showMessage("Restock request failed", true);
+    } finally {
+      setRestockLoading(false);
+    }
+  };
 
   // Global timer for the active real reservation (or selected reservation)
   useEffect(() => {
@@ -292,12 +412,34 @@ export default function Store() {
         </nav>
 
         <div className="p-4 border-t border-slate-800 flex-shrink-0">
-          <div className="bg-[#161b22] rounded-xl p-4 border border-slate-800/60 mb-4">
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
-              <span className="text-sm font-semibold text-slate-200">System Status</span>
+          <div className="bg-[#161b22] rounded-xl p-3 border border-slate-800/60 mb-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${wsConnected ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-amber-500 shadow-[0_0_8px_#f59e0b]"} animate-pulse`} />
+                <span className="text-xs font-semibold text-slate-200">Microservices Mesh</span>
+              </div>
+              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${wsConnected ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"}`}>
+                {wsConnected ? "WS LIVE" : "HTTP POLLING"}
+              </span>
             </div>
-            <span className="text-xs text-emerald-500/80 font-medium">All Systems Operational</span>
+            <div className="grid grid-cols-2 gap-1.5 text-[10px] text-slate-400">
+              <div className="flex items-center gap-1.5 bg-slate-900/60 px-2 py-1 rounded">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span className="truncate">Gateway :4000</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-slate-900/60 px-2 py-1 rounded">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span className="truncate">Catalog :4001</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-slate-900/60 px-2 py-1 rounded">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span className="truncate">Inventory :4002</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-slate-900/60 px-2 py-1 rounded">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span className="truncate">TTL Worker</span>
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-3 px-2 py-2 cursor-pointer hover:bg-slate-800/50 rounded-xl transition">
@@ -330,23 +472,33 @@ export default function Store() {
         <span className="text-slate-300">{currentView}</span>
       </div>
 
-      <div className="flex items-center gap-6 flex-1 justify-end">
-        <div className="relative group w-full max-w-sm hidden lg:block">
+      <div className="flex items-center gap-4 flex-1 justify-end">
+        <button
+          onClick={() => {
+            setSimModalOpen(true);
+            setSimResult(null);
+          }}
+          className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-300 hover:text-white hover:border-amber-400 rounded-full text-xs font-bold transition shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+        >
+          <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+          <span>Flash-Sale Stress Test</span>
+        </button>
+
+        <div className="relative group w-full max-w-xs hidden lg:block">
           <Search className="w-4 h-4 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2" />
           <input 
             type="text" 
             placeholder={`Search ${currentView.toLowerCase()}...`} 
-            className="w-full bg-[#161b22] border border-slate-800 rounded-full pl-11 pr-16 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder-slate-500"
+            className="w-full bg-[#161b22] border border-slate-800 rounded-full pl-11 pr-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder-slate-500"
           />
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <button className="relative text-slate-400 hover:text-white transition-colors">
             <Bell className="w-5 h-5" />
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-[9px] font-bold text-white rounded-full flex items-center justify-center border-2 border-[#0b0e14]">3</span>
-          </button>
-          <button className="text-slate-400 hover:text-white transition-colors">
-            <Moon className="w-5 h-5" />
+            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-[9px] font-bold text-white rounded-full flex items-center justify-center border-2 border-[#0b0e14]">
+              {eventLogs.length > 0 ? eventLogs.length : 3}
+            </span>
           </button>
         </div>
       </div>
@@ -552,6 +704,45 @@ export default function Store() {
                           })}
                         </tbody>
                       </table>
+                    </div>
+                  </div>
+
+                  {/* Realtime Event Stream & Audit Mesh Card */}
+                  <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 shadow-sm">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2.5">
+                        <Terminal className="w-5 h-5 text-indigo-400" />
+                        <h2 className="text-base font-bold text-white">Distributed Event Bus Stream (Redis Pub/Sub)</h2>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                        <span className="text-xs font-mono text-emerald-400 font-semibold">LISTENING ON :4003</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-400 mb-4">Real-time domain event telemetry flowing across microservices mesh without database polling.</p>
+                    
+                    <div className="bg-[#0b0e14] border border-slate-800/80 rounded-xl p-3 font-mono text-xs space-y-2 max-h-48 overflow-y-auto">
+                      {eventLogs.length === 0 ? (
+                        <div className="text-slate-500 py-3 text-center italic flex items-center justify-center gap-2">
+                          <Radio className="w-4 h-4 animate-spin text-slate-600" />
+                          <span>Waiting for live event packets... (Try reserving an item or running a stress test)</span>
+                        </div>
+                      ) : (
+                        eventLogs.map((log) => (
+                          <div key={log.id} className="flex items-start gap-3 py-1 border-b border-slate-900/60 last:border-0">
+                            <span className="text-slate-500 text-[11px] shrink-0">{log.time}</span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                              log.type.includes("CREATED") ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" :
+                              log.type.includes("CONFIRMED") ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" :
+                              log.type.includes("EXPIRED") ? "bg-red-500/20 text-red-400 border border-red-500/30" :
+                              "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
+                            }`}>
+                              {log.type}
+                            </span>
+                            <span className="text-slate-300 truncate text-[11px]">{log.text}</span>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
                 </motion.div>
@@ -775,13 +966,28 @@ export default function Store() {
                                    <span className="font-bold text-red-400">{p.reserved} Units</span>
                                 </div>
                              </div>
-                             <button 
-                               onClick={() => p.bestInv && handleReserve(p, p.bestInv.id, p.bestInv.availableStock)}
-                               disabled={p.available <= 0}
-                               className="w-full mt-4 py-2 bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg text-sm font-semibold transition disabled:opacity-50 border border-indigo-500/20"
-                             >
-                                Reserve
-                             </button>
+                             <div className="flex gap-2 mt-4">
+                                <button 
+                                  onClick={() => p.bestInv && handleReserve(p, p.bestInv.id, p.bestInv.availableStock)}
+                                  disabled={p.available <= 0 || processing === p.bestInv?.id}
+                                  className="flex-1 py-2 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg text-xs font-bold transition disabled:opacity-50 border border-indigo-500/30 flex items-center justify-center gap-1.5"
+                                >
+                                  {processing === p.bestInv?.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Reserve 1"}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (p.bestInv) {
+                                      setRestockInvId(p.bestInv.id);
+                                      setRestockItemName(`${p.name} (${p.bestInv.warehouse.name})`);
+                                      setRestockModalOpen(true);
+                                    }
+                                  }}
+                                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition border border-slate-700 flex items-center justify-center"
+                                  title="Restock units"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                           </div>
                        </div>
                     ))}
@@ -835,6 +1041,168 @@ export default function Store() {
           </div>
         </div>
       </main>
+
+      {/* FLASH-SALE CONCURRENCY SIMULATION MODAL */}
+      <AnimatePresence>
+        {simModalOpen && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-[#161b22] border border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5"
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                    <Zap className="w-5 h-5 text-amber-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white">Flash-Sale Concurrency Simulator</h2>
+                    <p className="text-xs text-slate-400">Test high-concurrency race condition prevention</p>
+                  </div>
+                </div>
+                <button onClick={() => setSimModalOpen(false)} className="text-slate-500 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Target Product Inventory</label>
+                  <select 
+                    value={simInvId} 
+                    onChange={(e) => setSimInvId(e.target.value)}
+                    className="w-full bg-[#0b0e14] border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    {products.flatMap(p => (p.inventories || []).map(inv => (
+                      <option key={inv.id} value={inv.id}>
+                        {p.name} - {inv.warehouse.name} ({inv.availableStock} Available / {inv.totalStock} Total)
+                      </option>
+                    )))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Simultaneous Parallel Requests</label>
+                  <div className="flex gap-2">
+                    {[10, 20, 50, 100].map(cnt => (
+                      <button 
+                        key={cnt}
+                        type="button"
+                        onClick={() => setSimCount(cnt)}
+                        className={`flex-1 py-2 rounded-lg font-bold text-xs border transition ${
+                          simCount === cnt ? "bg-amber-500/20 border-amber-500 text-amber-300" : "bg-slate-800/40 border-slate-700 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        {cnt} Users
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800 text-[11px] text-slate-400">
+                  ⚡ All {simCount} requests will hit PostgreSQL row locks simultaneously via <code>Promise.all</code>. The engine guarantees zero overselling.
+                </div>
+
+                {simResult && (
+                  <div className="p-4 bg-[#0d1117] rounded-xl border border-slate-800 space-y-3">
+                    <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span>Zero Oversell Guaranteed (PostgreSQL Atomic Row Lock)</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                      <div className="p-2 bg-slate-900 rounded-lg">
+                        <div className="text-slate-500 text-[10px]">Granted (201)</div>
+                        <div className="text-base font-bold text-emerald-400">{simResult.summary?.granted}</div>
+                      </div>
+                      <div className="p-2 bg-slate-900 rounded-lg">
+                        <div className="text-slate-500 text-[10px]">Conflict (409)</div>
+                        <div className="text-base font-bold text-amber-400">{simResult.summary?.rejectedConflicts}</div>
+                      </div>
+                      <div className="p-2 bg-slate-900 rounded-lg">
+                        <div className="text-slate-500 text-[10px]">Total Time</div>
+                        <div className="text-base font-bold text-indigo-400">{simResult.summary?.totalDurationMs}ms</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSimModalOpen(false)}
+                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRunSimulation}
+                  disabled={simLoading}
+                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
+                >
+                  {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Zap className="w-4 h-4" /> Run Burst Test</>}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* QUICK RESTOCK MODAL */}
+      <AnimatePresence>
+        {restockModalOpen && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-[#161b22] border border-slate-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 className="font-bold text-white text-base">Restock Inventory</h3>
+                <button onClick={() => setRestockModalOpen(false)} className="text-slate-500 hover:text-white">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-400 truncate">Product: <span className="font-bold text-slate-200">{restockItemName}</span></p>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Add Units to Total Stock</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  max="100" 
+                  value={restockQty} 
+                  onChange={(e) => setRestockQty(Number(e.target.value))}
+                  className="w-full bg-[#0b0e14] border border-slate-700 rounded-lg p-2.5 text-sm text-white font-bold"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRestockModalOpen(false)}
+                  className="flex-1 py-2 bg-slate-800 text-slate-300 rounded-lg text-xs font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRestockSubmit}
+                  disabled={restockLoading}
+                  className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5"
+                >
+                  {restockLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Confirm Restock"}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {toast && (

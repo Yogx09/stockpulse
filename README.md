@@ -1,61 +1,92 @@
-# Allo Take-Home: Stockpulse
+# ⚡ Stockpulse: Distributed Microservices Flash-Sale & Inventory Architecture
 
-**Live Demo URL:** [Insert your Vercel URL here after deployment]
+**Stockpulse** is a high-concurrency, event-driven microservices platform designed for high-scale flash sales, real-time inventory synchronization, and zero-oversell reservation guarantees.
 
-### My approach & understanding the problem
+---
 
-The core challenge of this assignment isn't just showing a countdown timer on the frontend. It's preventing overselling in a highly concurrent environment. If two users hit checkout at the exact same millisecond for the last physical unit in a warehouse, the database must safely reject one of them.
+## 🏗️ Architecture Overview
 
-My approach was to tackle this concurrency guarantee first at the database level, build a robust expiry mechanism, and then wrap it in an intuitive frontend that makes it easy to visualize the full reservation lifecycle.
+```mermaid
+graph TD
+    Client[Next.js Frontend Dashboard] -->|REST API| Gateway[API Gateway :4000]
+    Client -->|WebSocket Stream| RealtimeSvc[Realtime Gateway :4003]
 
-### How I solved concurrency
+    subgraph "Microservices Mesh"
+        Gateway -->|/api/products, /api/warehouses| CatalogSvc[Catalog Service :4001]
+        Gateway -->|/api/reservations/*| InventorySvc[Inventory Service :4002]
+    end
 
-To ensure race-condition-free reservations, I couldn't rely on a standard ORM findFirst followed by an update, because another network request could easily slide in between the read and the write. 
+    subgraph "Event Backbone & TTL Queue (Redis)"
+        InventorySvc -->|Publish domain events| RedisBus[(Redis Pub/Sub & Streams)]
+        InventorySvc -->|Schedule 10m TTL| RedisZSet[(Redis ZSET Delayed Queue)]
+        RedisZSet -->|Trigger Expiry| ExpiryWorker[Async Expiry Worker]
+        ExpiryWorker -->|Atomic Release & Event| InventorySvc
+        RedisBus -->|Broadcast events| RealtimeSvc
+    end
 
-Instead, I used an atomic raw SQL update wrapped inside a Prisma transaction. I executed: 
-```sql
-UPDATE "Inventory" SET "reservedStock" = "reservedStock" + 1 WHERE "id" = {id} AND ("totalStock" - "reservedStock") >= 1;
+    subgraph "Data Storage Layer"
+        CatalogSvc --> PostgresCatalog[(PostgreSQL / Resilient Cache)]
+        InventorySvc --> PostgresInventory[(PostgreSQL + Row Locks)]
+    end
 ```
 
-Because PostgreSQL evaluates the WHERE clause at execution time under row-level locks, it natively guarantees that we can never reserve more stock than we actually have. If a concurrent request tries to update the exact same row when available stock is 0, the WHERE condition fails, it affects 0 rows, and the API cleanly aborts with a 409 Conflict.
+---
 
-### How the expiry mechanism works
+## 🧩 Microservices Breakdown
 
-Reservations are held for 10 minutes. In production, I handle these expirations using a two-pronged approach:
+| Service | Port / Protocol | Responsibilities |
+| :--- | :--- | :--- |
+| **API Gateway** | `http://localhost:4000` | Unified reverse proxy, route routing, aggregated `/health` checks, rate limiting, and CORS. |
+| **Catalog Service** | `http://localhost:4001` | Product catalog, warehouse inventory aggregation, metadata queries, and caching. |
+| **Inventory Service** | `http://localhost:4002` | High-concurrency atomic reservation locking, Redis idempotency (`Idempotency-Key`), checkout confirmation, and release. |
+| **Expiry Worker** | Background Daemon | Monitors the Redis Sorted Set (`ZSET`) delayed queue with millisecond precision, automatically releasing expired reservations. |
+| **Realtime Gateway** | `ws://localhost:4003/ws` | WebSocket server broadcasting live inventory updates, order confirmations, and reservation timer ticks to all dashboards. |
+| **Shared Core** | `packages/shared` | Common domain types, Zod validators, Redis distributed lock primitives, structured logger, and event bus. |
 
-1. Lazy Cleanup: Whenever a user requests to make a new reservation for a specific inventory item, the API first checks for any expired pending reservations for that specific item. If it finds any, it immediately releases them and decrements the reservedStock before attempting to lock the new reservation. This guarantees a user isn't unfairly blocked from buying stock that expired just seconds ago.
+---
 
-2. Eager Cleanup: A Vercel Cron endpoint (/api/cron/release-expired) runs in the background to sweep the database and release any expired reservations globally. This keeps the global inventory metrics accurate even if no one is currently trying to buy that specific product.
+## 🚀 Quick Start & Running Locally
 
-(Bonus) Idempotency: I also added an idempotency layer using Redis to ensure that if a user's network drops and their client retries the request, we don't accidentally reserve 2 physical items.
-
-### How to run locally
-
-**Environment Setup**
-You'll need a PostgreSQL database and optionally a Redis database. Create a .env in the root directory:
-```env
-DATABASE_URL="your-postgres-url"
-DIRECT_URL="your-direct-postgres-url"
-UPSTASH_REDIS_REST_URL="your-redis-url"
-UPSTASH_REDIS_REST_TOKEN="your-redis-token"
-```
-
-**Database Migrations & Seeding**
+### 1. Run Everything Concurrently
 ```bash
-npx prisma generate
-npx prisma db push
-npm run seed
+# Starts API Gateway, Catalog, Inventory, Expiry Worker, Realtime Gateway + Next.js App
+npm run dev:all
 ```
 
-**Run the App**
+### 2. Run Only Backend Microservices Mesh
 ```bash
-npm run dev
+npm run dev:services
 ```
 
-### Trade-offs and what I'd do differently
+### 3. Run Microservices Individually (Independent Scaling)
+```bash
+npm run dev:gateway      # Port 4000
+npm run dev:catalog      # Port 4001
+npm run dev:inventory    # Port 4002
+npm run dev:realtime     # Port 4003
+npm run dev:expiry       # Background Worker
+```
 
-- **Optimistic UI vs Source of Truth**: Right now, the frontend waits for the database to confirm the reservation before updating the UI state. It's safer, but with more time, I'd implement optimistic UI updates to make the "Reserve" button click feel instantaneous.
+### 4. Run Automated Microservices Integration Tests
+```bash
+npm run test:services
+```
 
-- **Polling vs WebSockets**: I'm currently polling the backend every 5 seconds to keep the global stock numbers and reservation statuses fresh. For a true high-scale product drop, I'd swap this for WebSockets to push inventory updates to clients immediately.
+### 5. Docker Orchestration (Production Ready)
+```bash
+docker-compose up --build
+```
 
-- **Why a Single-Page App?**: Instead of building two completely disconnected pages for /products and /checkout, I decided to build out a centralized SPA dashboard. I did this because it made it significantly easier to test the end-to-end flow and visually track how global inventory numbers change in real-time.
+---
+
+## 🔒 Concurrency & Race-Condition Prevention
+
+1. **Row-Level Atomic Locking**: Inventory updates execute atomic SQL operations:
+   ```sql
+   UPDATE "Inventory" 
+   SET "reservedStock" = "reservedStock" + 1 
+   WHERE "id" = {id} AND ("totalStock" - "reservedStock") >= 1;
+   ```
+2. **Redis Idempotency**: All `POST /api/reservations` requests check `Idempotency-Key` in Redis to prevent duplicate charges during network retries.
+3. **Decoupled 10-Minute Expiry Engine**: Eliminated slow, blocking database cron sweeps by utilizing a Redis ZSET delayed queue.
+4. **WebSocket Live Sync**: Instant push updates (`RESERVATION_CREATED`, `RESERVATION_CONFIRMED`, `RESERVATION_EXPIRED`) to connected frontends.
