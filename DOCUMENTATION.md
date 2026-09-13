@@ -2,102 +2,42 @@
 
 ---
 
-## 1. Executive Summary
+## 1. 📊 Executive Dashboard (Live System)
 
-**Stockpulse** is a distributed, high-concurrency inventory reservation and flash-sale management system. It solves the classic e-commerce concurrency challenge: **how to handle millions of simultaneous checkout requests during flash sales while guaranteeing 0% overselling, maintaining low database latency, and providing real-time inventory visibility.**
+*The real-time Stockpulse Command Center featuring live reservation metrics, 10m TTL lock volume, cluster node latency, and high-density flash catalog availability.*
+
+![Stockpulse Executive Dashboard](public/docs/dashboard_overview.png)
 
 ---
 
-## 2. Distributed Architecture Overview
+## 2. 🏗️ Microservices Architecture & Distributed System Design
 
-```
-                                      ┌────────────────────────┐
-                                      │   Next.js 16 Web App   │
-                                      │   (Executive UI Dock)  │
-                                      └───────────┬────────────┘
-                                                  │
-                         ┌────────────────────────┴────────────────────────┐
-                         │ REST API                                        │ WebSockets (ws://)
-                         ▼                                                 ▼
-               ┌───────────────────┐                             ┌───────────────────┐
-               │    API Gateway    │                             │ Realtime Gateway  │
-               │    (Port 4000)    │                             │    (Port 4003)    │
-               └─────────┬─────────┘                             └─────────▲─────────┘
-                         │                                                 │
-          ┌──────────────┴──────────────┐                                  │
-          ▼                             ▼                                  │
-┌───────────────────┐         ┌───────────────────┐                        │
-│  Catalog Service  │         │ Inventory Service │                        │
-│    (Port 4001)    │         │    (Port 4002)    │                        │
-└─────────┬─────────┘         └─────────┬─────────┘                        │
-          │                             │                                  │
-          ▼                             ├───────────────────────┐          │
-┌───────────────────┐                   ▼                       ▼          │
-│ PostgreSQL / Seed │         ┌───────────────────┐   ┌──────────────────┐ │
-│   (Catalog DB)    │         │ PostgreSQL Locked │   │  Redis Pub/Sub   ├─┘
-└───────────────────┘         │  (Inventory DB)   │   │  & ZSET (Queue)  │
-                              └───────────────────┘   └─────────┬────────┘
-                                                                │
-                                                                ▼
-                                                      ┌───────────────────┐
-                                                      │   Expiry Worker   │
-                                                      │   (Daemon TTL)    │
-                                                      └───────────────────┘
+### Architecture Topology
+```mermaid
+graph TD
+    Client[Next.js 16 Executive Web App] -->|REST API Requests| Gateway[API Gateway :4000]
+    Client -->|WebSocket Stream| RealtimeSvc[Realtime WebSocket Gateway :4003]
+
+    subgraph "Microservices Mesh"
+        Gateway -->|/api/products, /api/warehouses| CatalogSvc[Catalog Service :4001]
+        Gateway -->|/api/reservations/*| InventorySvc[Inventory Service :4002]
+    end
+
+    subgraph "Event Backbone & Delayed TTL Queue (Redis)"
+        InventorySvc -->|Publish domain events| RedisBus[(Redis Pub/Sub & Streams)]
+        InventorySvc -->|Schedule 10m TTL| RedisZSet[(Redis ZSET Delayed Queue)]
+        RedisZSet -->|Trigger Expiry| ExpiryWorker[Async Expiry Worker]
+        ExpiryWorker -->|Atomic Release & Event| InventorySvc
+        RedisBus -->|Broadcast events| RealtimeSvc
+    end
+
+    subgraph "Data Storage Layer"
+        CatalogSvc --> PostgresCatalog[(PostgreSQL Catalog DB)]
+        InventorySvc --> PostgresInventory[(PostgreSQL Atomic Row Locks)]
+    end
 ```
 
----
-
-## 3. Core Technical Subsystems
-
-### 3.1. API Gateway (`services/api-gateway`)
-- **Framework**: Fastify with high-throughput routing.
-- **Port**: `4000`
-- **Role**: Reverse proxy and single entrypoint for all frontend API calls.
-- **Features**:
-  - Aggregated `/health` endpoint checking Catalog, Inventory, and Realtime health.
-  - Path-based routing: `/api/products` → Catalog (`:4001`), `/api/reservations/*` → Inventory (`:4002`).
-  - CORS header handling and request-id tracing.
-
-### 3.2. Catalog Service (`services/catalog-service`)
-- **Framework**: Fastify with PostgreSQL caching layer.
-- **Port**: `4001`
-- **Role**: Product catalog querying and multi-warehouse stock aggregation.
-- **Endpoints**:
-  - `GET /api/products`: Returns all items, images, descriptions, and linked warehouse availability.
-  - `GET /api/warehouses`: Returns warehouse fulfillment node locations and capacity.
-
-### 3.3. Inventory Service (`services/inventory-service`)
-- **Framework**: Fastify with Prisma ORM & raw atomic SQL locks.
-- **Port**: `4002`
-- **Role**: High-concurrency transaction processing.
-- **Guarantees**:
-  - **Atomic SQL Reservations**:
-    ```sql
-    UPDATE "Inventory" 
-    SET "reservedStock" = "reservedStock" + $qty 
-    WHERE "id" = $inventoryId AND ("totalStock" - "reservedStock") >= $qty;
-    ```
-  - **Idempotency Verification**: Validates `Idempotency-Key` headers in Redis within a 1-hour TTL window to safely prevent duplicate charges on retry.
-  - **Redis Delayed Queue Scheduling**: Schedules a 10-minute expiry timestamp into the `reservations:expirations` ZSET.
-  - **Pub/Sub Event Broadcasts**: Emits `RESERVATION_CREATED`, `RESERVATION_CONFIRMED`, `RESERVATION_RELEASED`, and `STOCK_UPDATED` events.
-
-### 3.4. Expiry Worker Daemon (`services/expiry-worker`)
-- **Framework**: Standalone Node.js process using Redis Sorted Sets (`ZSET`).
-- **Interval**: 1,000ms polling loop.
-- **Operation**:
-  - Queries `ZRANGEBYSCORE reservations:expirations -inf <currentTimestamp> LIMIT 0 50`.
-  - For each expired reservation ID, invokes the Inventory service atomic release procedure.
-  - Removes the item from the ZSET and broadcasts `RESERVATION_EXPIRED` to the event mesh.
-
-### 3.5. Realtime WebSocket Gateway (`services/realtime-service`)
-- **Framework**: `ws` WebSocket server connected to Redis Pub/Sub.
-- **Port**: `4003`
-- **Role**: Broadcasts domain events in real time to connected dashboards, enabling live counter updates without HTTP polling overhead.
-
----
-
-## 4. Concurrency & Race-Condition Safety Model
-
+### End-to-End Concurrency & Idempotency Flow
 ```mermaid
 sequenceDiagram
     autonumber
@@ -132,7 +72,69 @@ sequenceDiagram
 
 ---
 
-## 5. Database Schema & Data Models
+## 3. 🌐 Website Subviews & User Interface
+
+### Product Catalog & Multi-Node Fulfillment
+*Multi-warehouse distribution, instant 10-minute flash locks, stock replenishment, and multi-currency converter.*
+![Product Catalog](public/docs/catalog_view.png)
+
+### Lock Inspector & Instant Order Confirmation
+*Zero-scroll sliding window management with real-time TTL countdowns, inline quick actions, and status tracking.*
+![Lock Inspector](public/docs/reservations_inspector.png)
+
+### Parallel Flash-Sale Concurrency Simulator
+*Built-in stress testing suite firing 10 to 100 simultaneous atomic requests with zero-oversell validation.*
+![Concurrency Simulator](public/docs/concurrency_simulator.png)
+
+---
+
+## 4. 🧩 Core Subsystem Technical Specifications
+
+### 4.1. API Gateway (`services/api-gateway`)
+- **Framework**: Fastify with high-throughput routing.
+- **Port**: `4000`
+- **Role**: Single entrypoint and reverse proxy.
+- **Features**:
+  - Aggregated `/health` endpoint checking all downstream microservices.
+  - Path-based reverse routing: `/api/products` → Catalog (`:4001`), `/api/reservations/*` → Inventory (`:4002`).
+  - CORS and rate-limiting headers.
+
+### 4.2. Catalog Service (`services/catalog-service`)
+- **Framework**: Fastify with PostgreSQL caching layer.
+- **Port**: `4001`
+- **Role**: Product metadata and regional warehouse stock aggregation.
+
+### 4.3. Inventory Service (`services/inventory-service`)
+- **Framework**: Fastify with Prisma ORM & raw atomic SQL locks.
+- **Port**: `4002`
+- **Role**: High-concurrency transaction processing.
+- **Guarantees**:
+  - **Atomic SQL Reservations**:
+    ```sql
+    UPDATE "Inventory" 
+    SET "reservedStock" = "reservedStock" + $qty 
+    WHERE "id" = $inventoryId AND ("totalStock" - "reservedStock") >= $qty;
+    ```
+  - **Idempotency Verification**: Validates `Idempotency-Key` headers in Redis within a 1-hour TTL window to safely prevent duplicate charges on retry.
+  - **Redis Delayed Queue Scheduling**: Schedules a 10-minute expiry timestamp into the `reservations:expirations` ZSET.
+  - **Pub/Sub Event Broadcasts**: Emits `RESERVATION_CREATED`, `RESERVATION_CONFIRMED`, `RESERVATION_RELEASED`, and `STOCK_UPDATED` events.
+
+### 4.4. Expiry Worker Daemon (`services/expiry-worker`)
+- **Framework**: Standalone Node.js daemon using Redis Sorted Sets (`ZSET`).
+- **Interval**: 1,000ms polling loop.
+- **Operation**:
+  - Queries `ZRANGEBYSCORE reservations:expirations -inf <currentTimestamp> LIMIT 0 50`.
+  - Automatically releases expired locks back to warehouse stock.
+  - Broadcasts `RESERVATION_EXPIRED` to the event mesh.
+
+### 4.5. Realtime WebSocket Gateway (`services/realtime-service`)
+- **Framework**: `ws` WebSocket server connected to Redis Pub/Sub.
+- **Port**: `4003`
+- **Role**: Broadcasts domain events in real time to connected dashboards.
+
+---
+
+## 5. 🗄️ Database Schema & Data Models
 
 ```prisma
 model Product {
@@ -190,34 +192,15 @@ enum ReservationStatus {
 
 ---
 
-## 6. Frontend UI/UX Design System
+## 6. 🧪 Integration Testing Suite
 
-- **Layout Structure**: Fixed 80px left vertical dock, transparent luxury topbar, and scrollable fluid dashboard canvas.
-- **Color Tokens**:
-  - `Electric Orange Accent`: `#ff3b00` (Used for primary locks, active states, and call-to-actions).
-  - `Obsidian Contrast Dark`: `#14161a` (Used for primary hero cards, dark controls, and lock inspector).
-  - `Surface Gray`: `#f1f3f7` (Background canvas).
-  - `Pure White`: `#ffffff` (Metric cards and data tables).
-- **Interactive Views**:
-  - **Overview**: 4 Hero metric widgets, 12-month lock throughput bar charts with hover tooltips, node cluster latency breakdown, and live product catalog table.
-  - **Catalog**: Grid view with stock progress meters, currency converter, and restock modal triggers.
-  - **Flash Locks (Reservations)**: Ultra-compact Lock Inspector with zero-scroll top action buttons, live TTL countdown timers, and inline quick-action rows.
-  - **Analytics**: Conversion rate calculations, average lock duration, and distributed infrastructure metrics.
-  - **Live Mesh**: Terminal event stream rendering incoming WebSocket messages.
-  - **Warehouses**: Node capacity and distributed stock replenishment.
-  - **Slide-Over Notification Drawer**: Event feed drawer accessible via topbar bell.
-
----
-
-## 7. Verification & Automated Testing
-
-Stockpulse features automated end-to-end integration tests in `scripts/test-microservices.ts`:
+Automated end-to-end tests in `scripts/test-microservices.ts`:
 
 ```bash
 npm run test:services
 ```
 
-### Test Suite Execution Matrix:
+### Verification Matrix:
 1. `GET /health` (API Gateway Orchestration): Passed ✅
 2. `GET /api/products` (Catalog aggregation): Passed ✅
 3. `POST /api/reservations` (Atomic locking): Passed ✅
@@ -230,21 +213,21 @@ npm run test:services
 
 ---
 
-## 8. Deployment & Production Operations
+## 7. 🐳 Production Deployment (Docker Compose)
 
-### Docker Compose
 ```bash
 docker-compose up --build -d
 ```
-Starts:
-- `db`: PostgreSQL 16
-- `redis`: Redis 7.2 Alpine
-- `api-gateway`: Node.js container on port `4000`
-- `catalog-service`: Node.js container on port `4001`
-- `inventory-service`: Node.js container on port `4002`
-- `realtime-service`: WebSocket container on port `4003`
-- `expiry-worker`: Background worker daemon
-- `web`: Next.js production server on port `3000`
+
+Starts all containerized services:
+- PostgreSQL 16
+- Redis 7.2 Alpine
+- API Gateway (`:4000`)
+- Catalog Service (`:4001`)
+- Inventory Service (`:4002`)
+- Realtime Gateway (`:4003`)
+- Expiry Worker (Background Daemon)
+- Next.js Web Application (`:3000`)
 
 ---
 

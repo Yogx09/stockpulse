@@ -2,8 +2,6 @@
 
 <div align="center">
 
-![Stockpulse Banner](public/docs/dashboard_overview.png)
-
 [![Next.js](https://img.shields.io/badge/Next.js-16.2-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=for-the-badge&logo=postgresql)](https://www.postgresql.org/)
@@ -12,41 +10,24 @@
 
 **Stockpulse** is an enterprise-grade, event-driven microservices platform engineered for extreme flash-sale traffic, distributed warehouse synchronization, and **100% Zero-Oversell** atomic reservation guarantees.
 
-[Live Demo](#-live-dashboard--ui-tour) • [Architecture](#-system-architecture) • [Microservices](#-microservices-mesh) • [Quick Start](#-quick-start) • [API Reference](#-api-endpoints) • [Documentation](DOCUMENTATION.md)
-
 </div>
 
 ---
 
-## 📸 Live Dashboard & UI Tour
+## 1. 📊 Executive Dashboard (Live System)
 
-<div align="center">
+*The real-time Stockpulse Command Center featuring live reservation metrics, 10m TTL lock volume, cluster node latency, and high-density flash catalog availability.*
 
-### 1. Executive Inventory & Reservation Command Center
-*High-density overview with live 12-month lock throughput, regional node latencies, and real-time metric counters.*
-![Dashboard Overview](public/docs/dashboard_overview.png)
-
-### 2. High-Density Product Catalog & Warehouse Nodes
-*Multi-warehouse allocation, instant 10-minute flash locks, restock replenishment modals, and multi-currency conversion.*
-![Product Catalog](public/docs/catalog_grid.png)
-
-### 3. Compact Lock Inspector & 1-Click Order Confirmation
-*Zero-scroll sliding window management with real-time TTL countdowns and inline quick-actions.*
-![Lock Inspector](public/docs/reservations_inspector.png)
-
-### 4. Parallel Flash-Sale Concurrency Simulator
-*Built-in stress testing suite firing 10 to 100 simultaneous atomic requests with zero-oversell verification.*
-![Concurrency Simulator](public/docs/concurrency_simulator.png)
-
-</div>
+![Stockpulse Executive Dashboard](public/docs/dashboard_overview.png)
 
 ---
 
-## 🏗️ System Architecture
+## 2. 🏗️ Microservices Architecture & Event Diagrams
 
+### System Architecture Diagram
 ```mermaid
 graph TD
-    Client[Next.js 16 Luxury Frontend] -->|REST API Requests| Gateway[API Gateway :4000]
+    Client[Next.js 16 Luxury Frontend] -->|REST API Calls| Gateway[API Gateway :4000]
     Client -->|WebSocket Stream| RealtimeSvc[Realtime WebSocket Gateway :4003]
 
     subgraph "Microservices Mesh"
@@ -68,9 +49,58 @@ graph TD
     end
 ```
 
+### Concurrency Sequence Flow
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User Browser
+    participant GW as API Gateway (:4000)
+    participant Inv as Inventory Service (:4002)
+    participant DB as PostgreSQL (Row Lock)
+    participant Redis as Redis (ZSET & PubSub)
+    participant RT as Realtime Gateway (:4003)
+
+    User->>GW: POST /api/reservations (inventoryId, quantity=1, IdempotencyKey)
+    GW->>Inv: Forward Request
+    Inv->>Redis: Check IdempotencyKey
+    alt Duplicate Request
+        Redis-->>Inv: Return Cached Response
+        Inv-->>User: HTTP 200 (Idempotent replay)
+    else New Request
+        Inv->>DB: Atomic Update with WHERE available >= 1
+        alt Stock Available
+            DB-->>Inv: 1 Row Updated (Stock Locked)
+            Inv->>Redis: ZADD reservations:expirations (now + 600s, resId)
+            Inv->>Redis: PUBLISH event "RESERVATION_CREATED"
+            Redis->>RT: Push Event
+            RT->>User: WebSocket Event Update
+            Inv-->>User: HTTP 201 Created (10m TTL Lock Granted)
+        else Stock Depleted
+            DB-->>Inv: 0 Rows Updated (Conflict)
+            Inv-->>User: HTTP 409 Conflict (Zero-Oversell Guarantee)
+        end
+    end
+```
+
 ---
 
-## 🧩 Microservices Mesh Breakdown
+## 3. 🌐 Website & Subviews Showcase
+
+### Product Catalog & Warehouse Allocation
+*Multi-warehouse distribution, instant 10-minute flash locks, stock replenishment, and multi-currency converter.*
+![Product Catalog](public/docs/catalog_view.png)
+
+### Lock Inspector & 1-Click Order Confirmation
+*Zero-scroll sliding window management with real-time TTL countdowns, inline quick actions, and status tracking.*
+![Lock Inspector](public/docs/reservations_inspector.png)
+
+### Parallel Flash-Sale Concurrency Simulator
+*Built-in stress testing suite firing 10 to 100 simultaneous atomic requests with zero-oversell validation.*
+![Concurrency Simulator](public/docs/concurrency_simulator.png)
+
+---
+
+## 4. 🧩 Microservices Mesh Breakdown
 
 | Service | Port / Protocol | Technology | Responsibilities |
 | :--- | :--- | :--- | :--- |
@@ -83,7 +113,7 @@ graph TD
 
 ---
 
-## 🔒 Concurrency & Zero-Oversell Guarantees
+## 5. 🔒 Zero-Oversell Concurrency Model
 
 Stockpulse eliminates overselling under high concurrency through four layered defenses:
 
@@ -93,13 +123,13 @@ Stockpulse eliminates overselling under high concurrency through four layered de
    SET "reservedStock" = "reservedStock" + $qty 
    WHERE "id" = $inventoryId AND ("totalStock" - "reservedStock") >= $qty;
    ```
-2. **Distributed Redis Idempotency**: Every reservation request checks an `Idempotency-Key` header with TTL caching to avoid double charges on network retries.
+2. **Distributed Redis Idempotency**: Every reservation request checks an `Idempotency-Key` header with TTL caching to avoid duplicate charges on network retries.
 3. **Decoupled 10-Minute Expiry Engine**: Non-blocking Redis Sorted Set (`ZSET`) queue triggers automatic release without expensive table scans.
 4. **Optimistic UI with Realtime Sync**: Immediate feedback on lock actions paired with WebSocket broadcasts to synchronize all active clients.
 
 ---
 
-## 🚀 Quick Start
+## 6. 🚀 Quick Start & Setup
 
 ### Prerequisites
 - Node.js 18+ or 20+
@@ -134,7 +164,6 @@ npm run dev:expiry       # Background Worker
 ```bash
 npm run test:services
 ```
-*Executes all 9 end-to-end integration tests: catalog fetching, atomic locking, idempotency keys, confirmation workflows, and parallel race-condition verification.*
 
 ### 5. Production Docker Compose
 ```bash
@@ -143,7 +172,7 @@ docker-compose up --build
 
 ---
 
-## 📡 API Endpoints
+## 7. 📡 API Endpoints Reference
 
 ### Catalog Service (`:4001` or `:4000/api/products`)
 - `GET /api/products` — Retrieve all products with aggregated warehouse inventory.
@@ -167,7 +196,7 @@ docker-compose up --build
 
 ---
 
-## 🛠️ Tech Stack
+## 8. 🛠️ Tech Stack
 
 - **Frontend**: Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS, Framer Motion, Lucide Icons.
 - **Backend**: Node.js, TypeScript, Fastify, tsx.
@@ -177,9 +206,9 @@ docker-compose up --build
 
 ---
 
-## 📄 Documentation
+## 9. 📄 Detailed Documentation
 
-For deep technical architecture, database schemas, and distributed locking flowcharts, see [**DOCUMENTATION.md**](DOCUMENTATION.md).
+For deep technical architecture, database schemas, and distributed locking algorithms, refer to [**DOCUMENTATION.md**](DOCUMENTATION.md).
 
 ---
 
