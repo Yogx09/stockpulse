@@ -18,16 +18,16 @@
 
 *The real-time Stockpulse Command Center featuring live reservation metrics, 10m TTL lock volume, cluster node latency, and high-density flash catalog availability.*
 
-![Stockpulse Executive Dashboard](public/docs/dashboard_overview.png)
+![Stockpulse Executive Dashboard](public/docs/1_dashboard_overview.png)
 
 ---
 
 ## 2. 🏗️ Microservices Architecture & Event Diagrams
 
-### System Architecture Diagram
+### System Architecture Topology
 ```mermaid
 graph TD
-    Client[Next.js 16 Luxury Frontend] -->|REST API Calls| Gateway[API Gateway :4000]
+    Client[Next.js 16 Executive Web App] -->|REST API Calls| Gateway[API Gateway :4000]
     Client -->|WebSocket Stream| RealtimeSvc[Realtime WebSocket Gateway :4003]
 
     subgraph "Microservices Mesh"
@@ -49,7 +49,7 @@ graph TD
     end
 ```
 
-### Concurrency Sequence Flow
+### End-to-End Concurrency & Idempotency Sequence Flow
 ```mermaid
 sequenceDiagram
     autonumber
@@ -84,19 +84,23 @@ sequenceDiagram
 
 ---
 
-## 3. 🌐 Website & Subviews Showcase
-
-### Product Catalog & Warehouse Allocation
-*Multi-warehouse distribution, instant 10-minute flash locks, stock replenishment, and multi-currency converter.*
-![Product Catalog](public/docs/catalog_view.png)
-
-### Lock Inspector & 1-Click Order Confirmation
-*Zero-scroll sliding window management with real-time TTL countdowns, inline quick actions, and status tracking.*
-![Lock Inspector](public/docs/reservations_inspector.png)
+## 3. 🌐 Website Subviews & User Interface
 
 ### Parallel Flash-Sale Concurrency Simulator
 *Built-in stress testing suite firing 10 to 100 simultaneous atomic requests with zero-oversell validation.*
-![Concurrency Simulator](public/docs/concurrency_simulator.png)
+![Concurrency Simulator](public/docs/2_concurrency_simulator.png)
+
+### Flash Catalog & Real-Time Stock Availability Table
+*Instant CSV export, dynamic multi-currency converter, warehouse allocation, and 1-click lock actions.*
+![Flash Catalog Table](public/docs/3_flash_catalog_table.png)
+
+### Active Flash Reservations & Compact Lock Inspector
+*Zero-scroll sliding window management with real-time TTL countdowns, inline quick actions, and instant order confirmation.*
+![Lock Inspector](public/docs/4_reservations_inspector.png)
+
+### Product Catalog Grid & Node Availability Meters
+*Multi-warehouse distribution, instant 10-minute flash locks, stock replenishment, and multi-currency converter.*
+![Product Catalog](public/docs/5_product_catalog_cards.png)
 
 ---
 
