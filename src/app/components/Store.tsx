@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { formatDistanceToNowStrict, differenceInSeconds, format } from "date-fns";
+import { differenceInSeconds, format } from "date-fns";
 import { 
-  Package, Calendar, Building2, BarChart2, FileText, Settings, Search, Bell, Moon, LogOut,
-  MoreVertical, Activity, ChevronDown, CheckCircle2, AlertCircle, Loader2, X, Clock,
-  Plus, CalendarDays, Timer, CheckCircle, XCircle, ChevronRight, ChevronLeft, Maximize2, AlertTriangle, MapPin, TrendingUp,
-  Zap, Layers, Radio, Terminal, Cpu, ShieldCheck, RefreshCw
+  LayoutGrid, ShoppingBag, Tag, BarChart3, MessageSquare, Truck, Settings, LogOut,
+  Search, Bell, ChevronDown, CheckCircle2, AlertCircle, Loader2, X, Clock,
+  Plus, CalendarDays, Timer, CheckCircle, XCircle, ChevronRight, ChevronLeft, 
+  ArrowUpRight, AlertTriangle, MapPin, TrendingUp, Zap, Layers, Radio, Terminal, 
+  Cpu, ShieldCheck, RefreshCw, SlidersHorizontal, Download, Sparkles, Filter
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -15,6 +16,15 @@ type Product = {
   name: string;
   description: string;
   image: string;
+  price?: number | string;
+  oldPrice?: number | string;
+  discount?: string;
+  category?: string;
+  totalStock?: number;
+  reservedStock?: number;
+  availableStock?: number;
+  newPrice?: string | number;
+  itemsSold?: number;
   inventories: {
     id: string;
     warehouseId: string;
@@ -52,17 +62,23 @@ const formatDateSafe = (dateStr?: string | Date | null) => {
 };
 
 export default function Store() {
-  const [currentView, setCurrentView] = useState<"Dashboard" | "Products" | "Reservations" | "Warehouses" | "Analytics" | "Reports" | "Alerts" | "Settings">("Dashboard");
+  const [currentView, setCurrentView] = useState<"Dashboard" | "Products" | "Reservations" | "Warehouses" | "Analytics" | "Realtime">("Dashboard");
   const [products, setProducts] = useState<Product[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // Time filter state
+  const [categoryTimeFilter, setCategoryTimeFilter] = useState<"All time" | "Weekly" | "Monthly">("Monthly");
+  const [countryTimeFilter, setCountryTimeFilter] = useState<"All time" | "Weekly" | "Monthly">("All time");
+  const [chartMetric, setChartMetric] = useState<"Income" | "Profit">("Income");
+  const [activeHoverBar, setActiveHoverBar] = useState<number | null>(5); // Default to June hover
+
   // Real-time reservation state
   const [activeReservation, setActiveReservation] = useState<Reservation | null>(null);
   const [selectedRes, setSelectedRes] = useState<Reservation | null>(null);
   
   const [toast, setToast] = useState<{ msg: string, isError: boolean, id: number } | null>(null);
-  const [timeLeft, setTimeLeft] = useState<string>("");
+  const [timeLeft, setTimeLeft] = useState<string>("10:00");
   const [timerPercent, setTimerPercent] = useState<number>(100);
   const [processing, setProcessing] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState<boolean>(false);
@@ -87,7 +103,7 @@ export default function Store() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  // Instant restoration from local cache to prevent 0-flash
+  // Instant restoration from local cache
   useEffect(() => {
     try {
       const cachedProd = localStorage.getItem("stockpulse_products_cache");
@@ -156,7 +172,7 @@ export default function Store() {
                   time: new Date().toLocaleTimeString(),
                   text: typeof data.payload === "object" ? JSON.stringify(data.payload) : String(data.payload || "")
                 },
-                ...prev.slice(0, 7)
+                ...prev.slice(0, 9)
               ]);
 
               if (data.type === "RESERVATION_CREATED") {
@@ -171,9 +187,7 @@ export default function Store() {
                 showMessage(`📦 Event: Stock replenished in warehouse`, false);
               }
             }
-          } catch {
-            // ignore non-json
-          }
+          } catch {}
         };
         ws.onclose = () => {
           setWsConnected(false);
@@ -189,7 +203,6 @@ export default function Store() {
     };
 
     connectWs();
-
     const pollInterval = setInterval(() => fetchData(true), 15000);
     fetchData();
 
@@ -242,7 +255,7 @@ export default function Store() {
     }
   };
 
-  // Global timer for the active real reservation (or selected reservation)
+  // Global countdown timer for active reservation
   useEffect(() => {
     const target = selectedRes || activeReservation || reservations[0];
     if (!target || !target.expiresAt) return;
@@ -295,11 +308,10 @@ export default function Store() {
         };
         setActiveReservation(newRes);
         setSelectedRes(newRes);
-        // Optimistically add to list
         setReservations(prev => [newRes, ...prev]);
         setCurrentView("Reservations");
         window.scrollTo({ top: 0, behavior: "smooth" });
-        showMessage("Reservation created.", false);
+        showMessage("⚡ 10-Minute Lock Reserved Successfully!", false);
       }
     } catch {
       showMessage("Network error", true);
@@ -346,7 +358,7 @@ export default function Store() {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        showMessage("Reservation released.", false);
+        showMessage("Reservation released & stock returned.", false);
         const updated = { ...target, status: "RELEASED" };
         setActiveReservation(null);
         setSelectedRes(updated);
@@ -365,12 +377,14 @@ export default function Store() {
   const stats = useMemo(() => {
     let globalStock = 0;
     let globalReserved = 0;
+    let globalAvailable = 0;
     const warehouseMap = new Map();
 
     products.forEach(p => {
       p.inventories.forEach(inv => {
         globalStock += inv.totalStock;
         globalReserved += inv.reservedStock;
+        globalAvailable += inv.availableStock;
         
         if (!warehouseMap.has(inv.warehouse.name)) {
           warehouseMap.set(inv.warehouse.name, {
@@ -403,12 +417,19 @@ export default function Store() {
     const confirmed = reservations.filter(r => r.status === 'CONFIRMED').length;
     const expiredOrReleased = reservations.filter(r => r.status === 'EXPIRED' || r.status === 'RELEASED').length;
 
+    // Estimated revenue calculations for dashboard widgets
+    const totalRevenue = (globalStock * 240 + confirmed * 320) || 89649;
+    const totalOrdersAmount = (activeRes * 180 + confirmed * 290) || 14085;
+
     return { 
       productCount: products.length, 
       warehouseCount: warehouseMap.size, 
       warehouses: Array.from(warehouseMap.values()),
       globalStock, 
       globalReserved,
+      globalAvailable,
+      totalRevenue,
+      totalOrdersAmount,
       totalRes: reservations.length,
       activeRes,
       expiringSoon,
@@ -417,397 +438,893 @@ export default function Store() {
     };
   }, [products, reservations]);
 
-  const tableData = useMemo(() => {
-    return products.map(p => {
+  // Enriched retail products table data
+  const retailProducts = useMemo(() => {
+    return products.map((p, idx) => {
       const totalStock = p.inventories.reduce((sum, inv) => sum + inv.totalStock, 0);
       const reserved = p.inventories.reduce((sum, inv) => sum + inv.reservedStock, 0);
       const available = p.inventories.reduce((sum, inv) => sum + inv.availableStock, 0);
-      const activeWarehouses = p.inventories.filter(inv => inv.totalStock > 0).length;
-      const bestInv = [...p.inventories].sort((a,b) => b.availableStock - a.availableStock)[0];
-      return { ...p, totalStock, reserved, available, activeWarehouses, bestInv };
+      const basePrices = [114.00, 140.90, 311.00, 55.00, 89.00, 220.00];
+      const discounts = ["5%", "8%", "15%", "5%", "10%", "12%"];
+      const soldCounts = [294, 294, 69, 32, 145, 88];
+      const oldPrice = basePrices[idx % basePrices.length];
+      const discount = discounts[idx % discounts.length];
+      const discNum = parseInt(discount);
+      const newPrice = (oldPrice * (1 - discNum / 100)).toFixed(2);
+      
+      return {
+        ...p,
+        totalStock,
+        reservedStock: reserved,
+        availableStock: available,
+        oldPrice: oldPrice.toFixed(2),
+        discount,
+        newPrice,
+        itemsSold: soldCounts[idx % soldCounts.length] + reserved * 2
+      };
     });
   }, [products]);
 
   const displayRes = selectedRes || activeReservation || reservations[0];
 
-  if (loading && products.length === 0) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-[#0b0e14]">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-      </div>
-    );
-  }
-
+  // Render left vertical dock navigation
   const renderSidebar = () => {
     const navItems = [
-      { id: "Dashboard", icon: BarChart2 },
-      { id: "Products", icon: Package },
-      { id: "Reservations", icon: CalendarDays },
-      { id: "Warehouses", icon: Building2 },
-      { id: "Analytics", icon: Activity },
-      { id: "Reports", icon: FileText },
-      { id: "Alerts", icon: AlertCircle },
-      { id: "Settings", icon: Settings },
+      { view: "Dashboard" as const, icon: LayoutGrid, label: "Overview" },
+      { view: "Products" as const, icon: ShoppingBag, label: "Catalog" },
+      { view: "Reservations" as const, icon: Tag, label: "Flash Locks" },
+      { view: "Analytics" as const, icon: BarChart3, label: "Analytics" },
+      { view: "Realtime" as const, icon: MessageSquare, label: "Live Mesh" },
+      { view: "Warehouses" as const, icon: Truck, label: "Warehouses" },
     ];
 
     return (
-      <aside className="w-64 bg-[#11151d] border-r border-slate-800 flex-col hidden md:flex h-full">
-        <div className="h-20 flex items-center px-6 gap-3 flex-shrink-0 cursor-pointer" onClick={() => setCurrentView("Dashboard")}>
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Activity className="w-5 h-5 text-white" />
+      <aside className="w-20 md:w-24 bg-white border-r border-slate-200/80 flex flex-col items-center py-6 justify-between select-none shadow-[2px_0_12px_rgba(0,0,0,0.02)] z-30">
+        <div className="flex flex-col items-center gap-8 w-full">
+          {/* Logo Badge */}
+          <div 
+            onClick={() => setCurrentView("Dashboard")}
+            className="w-12 h-12 rounded-2xl bg-[#ff3b00] flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-[#ff3b00]/30 cursor-pointer hover:scale-105 transition-transform"
+          >
+            R
           </div>
-          <span className="text-xl font-bold text-white tracking-tight">StockPulse</span>
+
+          {/* Nav Icons */}
+          <nav className="flex flex-col items-center gap-3 w-full px-3">
+            {navItems.map((item) => {
+              const isActive = currentView === item.view;
+              return (
+                <button
+                  key={item.view}
+                  onClick={() => setCurrentView(item.view)}
+                  title={item.label}
+                  className={`relative w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 group ${
+                    isActive
+                      ? "bg-[#14161a] text-white shadow-md shadow-black/10"
+                      : "text-slate-400 hover:text-slate-900 hover:bg-slate-100"
+                  }`}
+                >
+                  <item.icon className="w-5 h-5 transition-transform group-hover:scale-110" />
+                  {item.view === "Realtime" && wsConnected && (
+                    <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
+                  )}
+                  {item.view === "Reservations" && stats.activeRes > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-[#ff3b00] text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white">
+                      {stats.activeRes}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
         </div>
 
-        <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
-          {navItems.map(item => (
-            <button 
-              key={item.id}
-              onClick={() => setCurrentView(item.id as "Dashboard" | "Products" | "Reservations" | "Warehouses" | "Analytics" | "Reports" | "Alerts" | "Settings")} 
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${currentView === item.id ? "bg-blue-600 text-white shadow-md shadow-blue-500/10" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"}`}
-            >
-              <item.icon className="w-5 h-5" /> {item.id}
-            </button>
-          ))}
-        </nav>
-
-        <div className="p-4 border-t border-slate-800 flex-shrink-0">
-          <div className="bg-[#161b22] rounded-xl p-3 border border-slate-800/60 mb-3">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full ${wsConnected ? "bg-emerald-500 shadow-[0_0_8px_#10b981]" : "bg-amber-500 shadow-[0_0_8px_#f59e0b]"} animate-pulse`} />
-                <span className="text-xs font-semibold text-slate-200">Microservices Mesh</span>
-              </div>
-              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${wsConnected ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border border-amber-500/20"}`}>
-                {wsConnected ? "WS LIVE" : "HTTP POLLING"}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 text-[10px] text-slate-400">
-              <div className="flex items-center gap-1.5 bg-slate-900/60 px-2 py-1 rounded">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="truncate">Gateway :4000</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-slate-900/60 px-2 py-1 rounded">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="truncate">Catalog :4001</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-slate-900/60 px-2 py-1 rounded">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="truncate">Inventory :4002</span>
-              </div>
-              <div className="flex items-center gap-1.5 bg-slate-900/60 px-2 py-1 rounded">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                <span className="truncate">TTL Worker</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 px-2 py-2 cursor-pointer hover:bg-slate-800/50 rounded-xl transition">
-            <div className="w-10 h-10 rounded-full bg-slate-700 overflow-hidden flex-shrink-0">
-              <img src="https://i.pravatar.cc/150?u=a042581f4e29026704d" alt="User" className="w-full h-full object-cover" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold text-white truncate">Arjun Patel</div>
-              <div className="text-[11px] text-slate-500 truncate">Administrator</div>
-            </div>
-            <ChevronDown className="w-4 h-4 text-slate-500" />
-          </div>
+        {/* Bottom Utility Icons */}
+        <div className="flex flex-col items-center gap-3 w-full px-3">
+          <button 
+            onClick={() => setSimModalOpen(true)}
+            title="Flash-Sale Simulator"
+            className="w-12 h-12 rounded-2xl text-slate-400 hover:text-[#ff3b00] hover:bg-orange-50 flex items-center justify-center transition"
+          >
+            <Zap className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => showMessage("Stockpulse v2.4 Microservices Mesh Active", false)}
+            title="System Settings"
+            className="w-12 h-12 rounded-2xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 flex items-center justify-center transition"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => fetchData(false)}
+            title="Refresh All Data"
+            className="w-12 h-12 rounded-2xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 flex items-center justify-center transition"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
         </div>
       </aside>
     );
   };
 
-  const renderTopbar = () => (
-    <header className="h-20 flex items-center justify-between px-8 bg-[#0b0e14]/80 backdrop-blur-md sticky top-0 z-20 border-b border-slate-800/50">
-      <div className="flex items-center md:hidden">
-        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center mr-3">
-          <Activity className="w-5 h-5 text-white" />
-        </div>
-        <span className="text-xl font-bold text-white">StockPulse</span>
-      </div>
-
-      <div className="hidden md:flex flex-1 items-center gap-2 text-sm text-slate-500 font-medium">
-        <span className="cursor-pointer hover:text-slate-300" onClick={() => setCurrentView("Dashboard")}>Home</span>
-        <ChevronRight className="w-3.5 h-3.5" />
-        <span className="text-slate-300">{currentView}</span>
-      </div>
-
-      <div className="flex items-center gap-4 flex-1 justify-end">
-        <button
-          onClick={() => {
-            setSimModalOpen(true);
-            setSimResult(null);
-          }}
-          className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-amber-500/20 to-orange-500/20 border border-amber-500/40 text-amber-300 hover:text-white hover:border-amber-400 rounded-full text-xs font-bold transition shadow-[0_0_12px_rgba(245,158,11,0.15)]"
-        >
-          <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-          <span>Flash-Sale Stress Test</span>
-        </button>
-
-        <div className="relative group w-full max-w-xs hidden lg:block">
-          <Search className="w-4 h-4 text-slate-500 absolute left-4 top-1/2 -translate-y-1/2" />
-          <input 
-            type="text" 
-            placeholder={`Search ${currentView.toLowerCase()}...`} 
-            className="w-full bg-[#161b22] border border-slate-800 rounded-full pl-11 pr-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all placeholder-slate-500"
-          />
+  // Render Top Header matching reference
+  const renderTopbar = () => {
+    return (
+      <header className="h-20 bg-transparent px-6 md:px-10 flex items-center justify-between select-none">
+        <div>
+          <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 leading-tight">
+            Retail Inventory
+          </h1>
+          <p className="text-xs font-semibold text-slate-400">
+            High-Concurrency Flash Reservation Engine
+          </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button className="relative text-slate-400 hover:text-white transition-colors">
-            <Bell className="w-5 h-5" />
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-[9px] font-bold text-white rounded-full flex items-center justify-center border-2 border-[#0b0e14]">
-              {eventLogs.length > 0 ? eventLogs.length : 3}
+        <div className="flex items-center gap-3 md:gap-4">
+          {/* Currency Pill */}
+          <div className="flex items-center gap-2 px-3.5 py-2 bg-white rounded-full border border-slate-200/80 shadow-xs text-xs font-bold text-slate-700 cursor-pointer hover:border-slate-300 transition">
+            <span className="text-sm">🇺🇸</span>
+            <span>USD</span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          </div>
+
+          {/* Search Pill */}
+          <button className="w-10 h-10 rounded-full bg-white border border-slate-200/80 shadow-xs flex items-center justify-center text-slate-600 hover:text-slate-900 hover:border-slate-300 transition">
+            <Search className="w-4 h-4" />
+          </button>
+
+          {/* Notification Pill */}
+          <button 
+            onClick={() => setCurrentView("Realtime")}
+            className="relative w-10 h-10 rounded-full bg-white border border-slate-200/80 shadow-xs flex items-center justify-center text-slate-600 hover:text-slate-900 hover:border-slate-300 transition"
+          >
+            <Bell className="w-4 h-4" />
+            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#14161a] text-white text-[9px] font-black rounded-full flex items-center justify-center border-2 border-white">
+              {eventLogs.length > 0 ? Math.min(9, eventLogs.length) : 2}
             </span>
           </button>
+
+          {/* User Profile Avatar */}
+          <div className="flex items-center gap-2 pl-2">
+            <div className="relative w-10 h-10 rounded-full overflow-hidden border-2 border-white shadow-md">
+              <img 
+                src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80" 
+                alt="User" 
+                className="w-full h-full object-cover"
+              />
+              <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white ${wsConnected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            </div>
+          </div>
         </div>
-      </div>
-    </header>
-  );
+      </header>
+    );
+  };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#0b0e14] text-slate-300 font-sans selection:bg-indigo-500/30">
+    <div className="flex h-screen overflow-hidden bg-[#f1f3f7] text-slate-900 font-sans selection:bg-[#ff3b00]/20">
+      {/* Sidebar Dock */}
       {renderSidebar()}
 
+      {/* Main App Container */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Topbar */}
         {renderTopbar()}
 
-        <div className="flex-1 overflow-y-auto p-4 md:p-8 pt-4 pb-24 scroll-smooth">
-          <div className="max-w-[1600px] mx-auto space-y-6">
+        {/* Scrollable Dashboard Canvas */}
+        <div className="flex-1 overflow-y-auto px-6 md:px-10 pb-16 scroll-smooth">
+          <div className="max-w-[1540px] mx-auto space-y-6">
             
+            {/* VIEW: DASHBOARD */}
             {currentView === "Dashboard" && (
               <AnimatePresence mode="wait">
-                <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
-                  {/* Dashboard Header */}
-                  <div className="mb-8">
-                    <h1 className="text-3xl font-bold text-white mb-2">Welcome back, Arjun! 👋</h1>
-                    <p className="text-slate-400">Here&apos;s what&apos;s happening with your inventory today.</p>
-                  </div>
-
-                  {/* Stat Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 flex items-center gap-5 shadow-sm">
-                      <div className="w-14 h-14 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg shadow-blue-600/20 flex-shrink-0">
-                        <Package className="w-7 h-7 text-white" />
+                <motion.div key="dash" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+                  
+                  {/* TOP ROW: 4 HERO METRIC WIDGETS */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                    
+                    {/* CARD 1: TOTAL ORDERS (Obsidian Dark) */}
+                    <div className="bg-[#14161a] text-white rounded-3xl p-6 shadow-xl flex flex-col justify-between relative overflow-hidden min-h-[220px]">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="text-xs font-semibold text-slate-400 mb-1">Total Orders</div>
+                          <div className="text-3xl font-black tracking-tight text-white flex items-center gap-2">
+                            ${(stats.totalOrdersAmount).toLocaleString()}
+                            <span className="text-[11px] font-bold text-red-400 bg-red-500/15 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                              ↘ 10%
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 font-medium">$15.650 last month</div>
+                        </div>
+                        <button className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 flex items-center justify-center transition">
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                      <div>
-                        <div className="text-sm font-medium text-slate-400 mb-1">Total Products</div>
-                        <div className="text-2xl font-bold text-white">
-                          {loading && products.length === 0 ? <span className="inline-block w-10 h-7 bg-slate-800 animate-pulse rounded"></span> : stats.productCount}
+
+                      {/* Sparkline Wave with Tooltip */}
+                      <div className="relative pt-6 pb-1">
+                        <div className="absolute right-12 top-2 bg-white text-slate-950 font-mono font-bold text-[10px] px-2 py-0.5 rounded-md shadow-md">
+                          $1210.6
+                        </div>
+                        <svg className="w-full h-16 overflow-visible" viewBox="0 0 260 60">
+                          <defs>
+                            <linearGradient id="curveGrad" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#ffffff" stopOpacity="0.2" />
+                              <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                            </linearGradient>
+                          </defs>
+                          <path
+                            d="M0 45 Q 30 50, 60 40 T 130 45 T 195 20 T 260 38 L 260 60 L 0 60 Z"
+                            fill="url(#curveGrad)"
+                          />
+                          <path
+                            d="M0 45 Q 30 50, 60 40 T 130 45 T 195 20 T 260 38"
+                            fill="none"
+                            stroke="#ffffff"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                          />
+                          <circle cx="195" cy="20" r="4.5" fill="#ffffff" stroke="#14161a" strokeWidth="2.5" />
+                        </svg>
+                        <div className="flex justify-between text-[10px] font-semibold text-slate-500 mt-2 px-1">
+                          <span>1Feb</span>
+                          <span>8Feb</span>
+                          <span>16Feb</span>
+                          <span>25Feb</span>
+                          <span>30Feb</span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 flex items-center gap-5 shadow-sm">
-                      <div className="w-14 h-14 rounded-xl bg-purple-600 flex items-center justify-center shadow-lg shadow-purple-600/20 flex-shrink-0">
-                        <Calendar className="w-7 h-7 text-white" />
+                    {/* CARD 2: TOTAL CUSTOMERS (Electric Flame Orange) */}
+                    <div className="bg-[#ff3b00] text-white rounded-3xl p-6 shadow-xl shadow-[#ff3b00]/25 flex flex-col justify-between relative overflow-hidden min-h-[220px]">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="text-xs font-semibold text-white/80 mb-1">Total Customers</div>
+                          <div className="text-3xl font-black tracking-tight text-white flex items-center gap-2">
+                            1.222
+                            <span className="text-[11px] font-bold text-white bg-white/20 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                              ↗ +79%
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-white/80 mt-0.5 font-medium">683 users last month</div>
+                        </div>
+                        <button className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition">
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                      <div>
-                        <div className="text-sm font-medium text-slate-400 mb-1">Active Reservations</div>
-                        <div className="text-2xl font-bold text-white">
-                          {loading && reservations.length === 0 ? <span className="inline-block w-10 h-7 bg-slate-800 animate-pulse rounded"></span> : stats.activeRes}
+
+                      {/* Split Ratio Slider */}
+                      <div className="pt-6">
+                        <div className="flex h-14 w-full rounded-2xl overflow-hidden bg-black/10 p-1 gap-1">
+                          <div className="w-[28%] bg-white rounded-xl flex items-center justify-center text-slate-900 font-black text-xs">
+                            23%
+                          </div>
+                          <div className="flex-1 bg-[#14161a] rounded-xl flex items-center justify-center text-white font-black text-xs">
+                            77%
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-6 mt-3 text-[11px] font-bold text-white/90">
+                          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-white" /> Men</span>
+                          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-[#14161a]" /> Women</span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 flex items-center gap-5 shadow-sm">
-                      <div className="w-14 h-14 rounded-xl bg-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-600/20 flex-shrink-0">
-                        <Building2 className="w-7 h-7 text-white" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-slate-400 mb-1">Warehouses</div>
-                        <div className="text-2xl font-bold text-white">
-                          {loading && products.length === 0 ? <span className="inline-block w-10 h-7 bg-slate-800 animate-pulse rounded"></span> : stats.warehouseCount}
+                    {/* CARD 3: TOTAL REVENUE (Pure White Card) */}
+                    <div className="bg-white text-slate-900 rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col justify-between min-h-[220px]">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <div className="text-xs font-semibold text-slate-400 mb-1">Total Revenue</div>
+                          <div className="text-3xl font-black tracking-tight text-slate-900 flex items-center gap-2">
+                            ${(stats.totalRevenue).toLocaleString()}
+                            <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-0.5">
+                              ↗ +21%
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 font-medium">$73 925 last month</div>
                         </div>
+                        <button className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition">
+                          <SlidersHorizontal className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                    </div>
 
-                    <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 flex items-center gap-5 shadow-sm">
-                      <div className="w-14 h-14 rounded-xl bg-orange-500 flex items-center justify-center shadow-lg shadow-orange-500/20 flex-shrink-0">
-                        <BarChart2 className="w-7 h-7 text-white" />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-slate-400 mb-1">Total Inventory</div>
-                        <div className="text-2xl font-bold text-white">
-                          {loading && products.length === 0 ? <span className="inline-block w-14 h-7 bg-slate-800 animate-pulse rounded"></span> : (stats.globalStock).toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Middle Grid */}
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-2 bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 shadow-sm flex flex-col min-h-[400px]">
-                      <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-lg font-bold text-white">Inventory Overview</h2>
-                        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 text-xs font-medium text-slate-300 cursor-pointer hover:bg-slate-800 transition">
-                          <Calendar className="w-3.5 h-3.5" /> This Week <ChevronDown className="w-3.5 h-3.5 ml-1" />
-                        </div>
-                      </div>
-                      <div className="flex-1 relative w-full flex items-end pt-10">
-                        <div className="absolute inset-0 flex flex-col justify-between pb-8 pt-4">
-                          {[40, 30, 20, 10, 0].map(val => (
-                            <div key={val} className="w-full flex items-center gap-4">
-                              <span className="text-[10px] text-slate-500 w-6 text-right">{val ? `${val}K` : '0'}</span>
-                              <div className="flex-1 h-[1px] bg-slate-800/50" />
+                      {/* Heatmap Vertical Matrix */}
+                      <div className="pt-6">
+                        <div className="flex justify-between items-end h-16 px-1">
+                          {[
+                            { day: "Mon", bars: 3, active: false },
+                            { day: "Tue", bars: 4, active: false },
+                            { day: "Wed", bars: 2, active: false },
+                            { day: "Thu", bars: 7, active: true },
+                            { day: "Fri", bars: 4, active: false },
+                            { day: "Sat", bars: 3, active: false },
+                            { day: "Sun", bars: 2, active: false },
+                          ].map((col, idx) => (
+                            <div key={idx} className="flex flex-col items-center gap-1">
+                              <div className="flex flex-col-reverse gap-0.5">
+                                {Array.from({ length: 7 }).map((_, bi) => {
+                                  const isFilled = bi < col.bars;
+                                  return (
+                                    <div
+                                      key={bi}
+                                      className={`w-4 h-1.5 rounded-xs transition-all ${
+                                        col.active
+                                          ? isFilled ? "bg-[#14161a]" : "bg-slate-100"
+                                          : isFilled ? "bg-slate-300" : "bg-slate-100"
+                                      }`}
+                                    />
+                                  );
+                                })}
+                              </div>
+                              <span className="text-[9px] font-bold text-slate-400 mt-1">{col.day}</span>
                             </div>
                           ))}
                         </div>
-                        <div className="absolute inset-0 left-10 pb-8 pt-4">
-                          <svg viewBox="0 0 1000 300" preserveAspectRatio="none" className="w-full h-full overflow-visible">
-                            <defs>
-                              <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.4" />
-                                <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
-                              </linearGradient>
-                            </defs>
-                            <path d="M0,180 C100,120 200,80 300,140 C400,200 450,110 500,115 C550,120 600,60 700,80 C800,100 850,130 900,140 C950,150 980,110 1000,90 L1000,300 L0,300 Z" fill="url(#chartGradient)" />
-                            <path d="M0,180 C100,120 200,80 300,140 C400,200 450,110 500,115 C550,120 600,60 700,80 C800,100 850,130 900,140 C950,150 980,110 1000,90" fill="none" stroke="#3b82f6" strokeWidth="3" />
-                            <circle cx="500" cy="115" r="4" fill="#60a5fa" stroke="#fff" strokeWidth="2" className="drop-shadow-lg" />
-                          </svg>
-                          <div className="absolute top-[80px] left-[45%] -translate-x-1/2 bg-[#161b22] border border-slate-700 p-3 rounded-xl shadow-xl z-10 flex flex-col items-center">
-                            <span className="text-[10px] text-slate-400 font-medium mb-1">Thursday</span>
-                            <span className="text-sm font-bold text-white tracking-tight">{(stats.globalStock).toLocaleString()} <span className="text-[10px] text-slate-500 font-normal">items</span></span>
-                          </div>
+                      </div>
+                    </div>
+
+                    {/* CARD 4: TOP CATEGORIES (Radial Donut) */}
+                    <div className="bg-white text-slate-900 rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col justify-between min-h-[220px]">
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="text-sm font-bold text-slate-900">Top categories</div>
+                        <button className="text-slate-400 hover:text-slate-900 transition">
+                          <ArrowUpRight className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Donut Chart SVG */}
+                      <div className="flex items-center justify-center relative py-2">
+                        <svg className="w-28 h-28 transform -rotate-90" viewBox="0 0 100 100">
+                          {/* Slices */}
+                          <circle cx="50" cy="50" r="38" fill="transparent" stroke="#14161a" strokeWidth="14" strokeDasharray="60 178" strokeDashoffset="0" />
+                          <circle cx="50" cy="50" r="38" fill="transparent" stroke="#ff3b00" strokeWidth="14" strokeDasharray="45 193" strokeDashoffset="-60" />
+                          <circle cx="50" cy="50" r="38" fill="transparent" stroke="#e2e8f0" strokeWidth="14" strokeDasharray="30 208" strokeDashoffset="-105" />
+                          <circle cx="50" cy="50" r="38" fill="transparent" stroke="#cbd5e1" strokeWidth="14" strokeDasharray="45 193" strokeDashoffset="-135" />
+                          <circle cx="50" cy="50" r="38" fill="transparent" stroke="#94a3b8" strokeWidth="14" strokeDasharray="30 208" strokeDashoffset="-180" />
+                        </svg>
+                        <div className="absolute flex flex-col items-center">
+                          <span className="text-xs font-black text-slate-900">35%</span>
                         </div>
-                        <div className="absolute bottom-0 left-10 right-0 flex justify-between text-[11px] font-medium text-slate-500">
-                          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                      </div>
+
+                      {/* Legend & Filter Pills */}
+                      <div>
+                        <div className="flex flex-wrap items-center justify-center gap-3 text-[10px] font-bold text-slate-600 mb-3">
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#ff3b00]" /> T-shirts</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#14161a]" /> Hoodies</span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" /> Jeans</span>
+                        </div>
+                        <div className="flex bg-slate-100 p-1 rounded-full text-[10px] font-bold">
+                          {(["All time", "Weekly", "Monthly"] as const).map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setCategoryTimeFilter(t)}
+                              className={`flex-1 py-1 rounded-full transition-all ${
+                                categoryTimeFilter === t
+                                  ? "bg-[#ff3b00] text-white shadow-xs"
+                                  : "text-slate-500 hover:text-slate-900"
+                              }`}
+                            >
+                              {t}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     </div>
 
-                    {/* Donut Chart */}
-                    <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 shadow-sm flex flex-col">
-                      <h2 className="text-lg font-bold text-white mb-6">Warehouse Distribution</h2>
-                      <div className="flex-1 flex flex-col items-center justify-center">
-                        <div className="relative w-48 h-48 mb-6">
-                          <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90 filter drop-shadow-md">
-                            <circle cx="50" cy="50" r="40" fill="transparent" stroke="#1e293b" strokeWidth="20" />
-                            <circle cx="50" cy="50" r="40" fill="transparent" stroke="#3b82f6" strokeWidth="20" strokeDasharray="251.2" strokeDashoffset="0" className="opacity-90" />
-                            <circle cx="50" cy="50" r="40" fill="transparent" stroke="#0ea5e9" strokeWidth="20" strokeDasharray="251.2" strokeDashoffset="80" className="opacity-90" />
-                            <circle cx="50" cy="50" r="40" fill="transparent" stroke="#10b981" strokeWidth="20" strokeDasharray="251.2" strokeDashoffset="150" className="opacity-90" />
-                          </svg>
-                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#161b22] rounded-full w-32 h-32 m-auto border-[10px] border-[#161b22]">
-                            <span className="text-xl font-bold text-white tracking-tight">{(stats.globalStock).toLocaleString()}</span>
-                            <span className="text-[10px] text-slate-500 font-medium">Total Items</span>
-                          </div>
-                        </div>
-                        <div className="w-full space-y-2.5">
-                          {stats.warehouses.map((w, i) => {
-                             const colors = ["bg-blue-500", "bg-sky-500", "bg-emerald-500", "bg-amber-500", "bg-purple-500"];
-                             const percentage = ((w.totalStock / stats.globalStock) * 100).toFixed(1);
-                             return (
-                              <div key={w.name} className="flex items-center justify-between text-xs">
-                                <div className="flex items-center gap-2">
-                                  <div className={`w-2 h-2 rounded-full ${colors[i % colors.length]}`} />
-                                  <span className="text-slate-300 font-medium">{w.name}</span>
-                                </div>
-                                <span className="text-slate-400 font-mono">{percentage}%</span>
-                              </div>
-                             )
-                          })}
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
-                  {/* Top Products Table */}
-                  <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 shadow-sm overflow-hidden flex flex-col">
-                    <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-lg font-bold text-white">Top Products</h2>
-                      <button onClick={() => setCurrentView("Products")} className="text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-700/50 hover:bg-slate-800 transition">View all</button>
-                    </div>
+                  {/* MIDDLE ROW: MAIN VOLUME BAR CHART + REGIONAL LOAD */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     
+                    {/* TOTAL ORDERS & FLASH SALE VOLUME CHART */}
+                    <div className="lg:col-span-2 bg-white rounded-3xl p-7 shadow-sm border border-slate-200/80 flex flex-col justify-between min-h-[360px]">
+                      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+                        <div className="text-base font-bold text-slate-900">Total Orders</div>
+                        
+                        <div className="flex items-center gap-6">
+                          <div className="flex items-center gap-4 text-xs font-bold text-slate-600">
+                            <label 
+                              onClick={() => setChartMetric("Income")}
+                              className="flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${chartMetric === "Income" ? "border-slate-900" : "border-slate-300"}`}>
+                                {chartMetric === "Income" && <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
+                              </span>
+                              Income
+                            </label>
+                            <label 
+                              onClick={() => setChartMetric("Profit")}
+                              className="flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center ${chartMetric === "Profit" ? "border-slate-900" : "border-slate-300"}`}>
+                                {chartMetric === "Profit" && <span className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
+                              </span>
+                              Profit
+                            </label>
+                          </div>
+                          <button className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition">
+                            <SlidersHorizontal className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 12-Month Interactive Bar Chart */}
+                      <div className="relative flex-1 flex items-end justify-between pt-10 pb-4 px-2">
+                        {[
+                          { m: "Jan", hSolid: 55, hStripe: 25, isSpecial: false },
+                          { m: "Feb", hSolid: 40, hStripe: 30, isSpecial: false },
+                          { m: "Mar", hSolid: 60, hStripe: 25, isSpecial: false },
+                          { m: "Apr", hSolid: 45, hStripe: 30, isSpecial: false },
+                          { m: "May", hSolid: 50, hStripe: 20, isSpecial: false },
+                          { m: "Jun", hSolid: 75, hStripe: 25, isSpecial: true }, // Special active orange
+                          { m: "Jul", hSolid: 60, hStripe: 20, isSpecial: false },
+                          { m: "Aug", hSolid: 35, hStripe: 25, isSpecial: false },
+                          { m: "Sep", hSolid: 50, hStripe: 30, isSpecial: false },
+                          { m: "Oct", hSolid: 70, hStripe: 20, isSpecial: false },
+                          { m: "Nov", hSolid: 65, hStripe: 15, isSpecial: false },
+                          { m: "Dec", hSolid: 40, hStripe: 30, isSpecial: false },
+                        ].map((col, idx) => (
+                          <div 
+                            key={col.m} 
+                            onMouseEnter={() => setActiveHoverBar(idx)}
+                            className="flex flex-col items-center gap-2 group cursor-pointer relative"
+                          >
+                            {/* Hover Tooltip Popup on June (or active) */}
+                            {activeHoverBar === idx && (
+                              <motion.div 
+                                initial={{ opacity: 0, y: -6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="absolute -top-16 z-20 bg-[#14161a] text-white text-[10px] font-bold px-3 py-2 rounded-xl shadow-xl whitespace-nowrap flex flex-col gap-0.5"
+                              >
+                                <div className="text-slate-300">{col.m}, 09</div>
+                                <div className="flex items-center gap-3">
+                                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-white" /> Sold 30</span>
+                                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-[#ff3b00]" /> Lock 15</span>
+                                </div>
+                              </motion.div>
+                            )}
+
+                            {/* Bar Stack */}
+                            <div className="w-7 md:w-9 flex flex-col justify-end h-48 rounded-lg overflow-hidden transition-all duration-300 group-hover:scale-105">
+                              {/* Striped Pattern Header Bar */}
+                              <div 
+                                style={{ height: `${col.hStripe}%` }} 
+                                className="w-full bg-pattern-stripes border border-slate-300/40 rounded-t-sm"
+                              />
+                              {/* Solid Bottom Bar */}
+                              <div 
+                                style={{ height: `${col.hSolid}%` }} 
+                                className={`w-full transition-colors ${col.isSpecial ? "bg-[#ff3b00]" : "bg-[#14161a]"}`}
+                              >
+                                {col.isSpecial && (
+                                  <div className="w-full h-full flex items-center justify-center text-[9px] font-black text-white">
+                                    25%
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            <span className="text-[11px] font-bold text-slate-500 group-hover:text-slate-900 transition-colors">
+                              {col.m}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* SALES BY COUNTRY / WAREHOUSE GEO LOAD */}
+                    <div className="bg-white rounded-3xl p-7 shadow-sm border border-slate-200/80 flex flex-col justify-between min-h-[360px]">
+                      <div className="flex justify-between items-center mb-4">
+                        <div className="text-base font-bold text-slate-900">Sales by country</div>
+                        <button className="text-slate-400 hover:text-slate-900 transition">
+                          <ArrowUpRight className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Vertical Country Bars */}
+                      <div className="flex items-end justify-between h-44 px-2 py-2">
+                        {[
+                          { country: "USA", percent: "25%", h: "90%" },
+                          { country: "Japan", percent: "22%", h: "78%" },
+                          { country: "UK", percent: "20%", h: "70%" },
+                          { country: "Korea", percent: "18%", h: "62%" },
+                          { country: "Spain", percent: "15%", h: "52%" },
+                        ].map((c) => (
+                          <div key={c.country} className="flex flex-col items-center gap-2 group">
+                            <span className="text-[10px] font-bold text-slate-500">{c.percent}</span>
+                            <div className="w-6 md:w-7 bg-slate-100 h-32 rounded-lg flex items-end overflow-hidden">
+                              <div 
+                                style={{ height: c.h }} 
+                                className="w-full bg-[#14161a] rounded-lg transition-all group-hover:bg-[#ff3b00]"
+                              />
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-500 mt-1">{c.country}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Country Filter Pills & Export CTA */}
+                      <div className="space-y-4 pt-2">
+                        <div className="flex bg-slate-100 p-1 rounded-full text-[10px] font-bold">
+                          {(["All time", "Weekly", "Monthly"] as const).map((t) => (
+                            <button
+                              key={t}
+                              onClick={() => setCountryTimeFilter(t)}
+                              className={`flex-1 py-1.5 rounded-full transition-all ${
+                                countryTimeFilter === t
+                                  ? "bg-[#ff3b00] text-white shadow-xs"
+                                  : "text-slate-500 hover:text-slate-900"
+                              }`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+
+                        <button 
+                          onClick={() => setSimModalOpen(true)}
+                          className="w-full bg-[#14161a] hover:bg-black text-white text-xs font-bold py-3.5 px-4 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-black/10 transition active:scale-[0.99]"
+                        >
+                          <Zap className="w-4 h-4 text-[#ff3b00]" />
+                          ⚡ Run Flash-Sale Stress Test
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* BOTTOM ROW: HIGH-DENSITY PRODUCT SALES TABLE */}
+                  <div className="bg-white rounded-3xl p-7 shadow-sm border border-slate-200/80">
+                    <div className="flex justify-between items-center mb-6">
+                      <div>
+                        <div className="text-base font-bold text-slate-900">Product sales</div>
+                        <div className="text-xs text-slate-400 font-medium">Real-time inventory locks & flash availability</div>
+                      </div>
+                      <button 
+                        onClick={() => setCurrentView("Products")}
+                        className="text-slate-400 hover:text-slate-900 transition flex items-center gap-1 text-xs font-bold"
+                      >
+                        View all <ArrowUpRight className="w-4 h-4" />
+                      </button>
+                    </div>
+
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse min-w-[600px]">
+                      <table className="w-full text-left border-collapse">
                         <thead>
-                          <tr className="border-b border-slate-800">
-                            <th className="pb-3 text-xs font-semibold text-slate-400 font-sans tracking-wide">Product</th>
-                            <th className="pb-3 text-xs font-semibold text-slate-400 font-sans tracking-wide text-right">Total Stock</th>
-                            <th className="pb-3 text-xs font-semibold text-slate-400 font-sans tracking-wide text-right">Reserved</th>
-                            <th className="pb-3 text-xs font-semibold text-slate-400 font-sans tracking-wide text-right">Available</th>
-                            <th className="pb-3 text-xs font-semibold text-slate-400 font-sans tracking-wide text-center">Status</th>
-                            <th className="pb-3 w-10"></th>
+                          <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider pb-3">
+                            <th className="pb-3 font-semibold">Item</th>
+                            <th className="pb-3 font-semibold text-center">Stock</th>
+                            <th className="pb-3 font-semibold text-center">Old price</th>
+                            <th className="pb-3 font-semibold text-center">Sale</th>
+                            <th className="pb-3 font-semibold text-center">New price</th>
+                            <th className="pb-3 font-semibold text-center">Items sold</th>
+                            <th className="pb-3 font-semibold text-right">Instant Action</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800/60">
-                          {tableData.slice(0,5).map((p) => {
-                            const inStock = p.available > 0;
+                        <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                          {retailProducts.map((p) => {
+                            const firstInv = p.inventories[0];
+                            const isProc = processing === firstInv?.id;
+
                             return (
-                              <tr key={p.id} className="hover:bg-slate-800/30 transition-colors group">
+                              <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                                 <td className="py-4">
                                   <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 overflow-hidden flex-shrink-0">
-                                      {p.image && <img src={p.image} alt={p.name} className="w-full h-full object-cover" />}
+                                    <div className="w-10 h-10 rounded-xl bg-slate-100 overflow-hidden flex-shrink-0 border border-slate-200/60">
+                                      <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
                                     </div>
                                     <div>
-                                      <div className="text-sm font-semibold text-slate-200">{p.name}</div>
-                                      <div className="text-[11px] text-slate-500 truncate max-w-[200px]">{p.description}</div>
+                                      <div className="font-bold text-slate-900">{p.name}</div>
+                                      <div className="text-[11px] text-slate-400">{firstInv?.warehouse?.name || "Main Node"}</div>
                                     </div>
                                   </div>
                                 </td>
-                                <td className="py-4 text-right font-semibold text-white text-sm">{p.totalStock.toLocaleString()}</td>
-                                <td className="py-4 text-right font-semibold text-red-400 text-sm">{p.reserved.toLocaleString()}</td>
-                                <td className="py-4 text-right font-semibold text-emerald-400 text-sm">{p.available.toLocaleString()}</td>
+                                
                                 <td className="py-4 text-center">
-                                  <span className={`inline-flex items-center px-2 py-1 rounded text-[9px] font-bold tracking-wider border ${
-                                    inStock ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-red-500/10 text-red-500 border-red-500/20"
-                                  }`}>
-                                    {inStock ? "IN STOCK" : "DEPLETED"}
+                                  <span className={`inline-block font-bold ${p.availableStock > 0 ? "text-slate-900" : "text-red-500 font-extrabold"}`}>
+                                    {p.availableStock}
                                   </span>
                                 </td>
-                                <td className="py-4 text-right relative">
-                                   {inStock && p.bestInv && (
-                                      <button 
-                                        onClick={() => handleReserve(p, p.bestInv.id, p.bestInv.availableStock)}
-                                        disabled={processing === p.bestInv.id}
-                                        className="opacity-0 group-hover:opacity-100 transition-opacity bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded flex items-center justify-center w-20 shadow-md absolute top-1/2 -translate-y-1/2 right-2"
-                                      >
-                                        {processing === p.bestInv.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Reserve"}
-                                      </button>
-                                   )}
+
+                                <td className="py-4 text-center font-semibold text-slate-400 line-through">
+                                  ${p.oldPrice}
+                                </td>
+
+                                <td className="py-4 text-center">
+                                  <span className="inline-block text-[10px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                                    {p.discount}
+                                  </span>
+                                </td>
+
+                                <td className="py-4 text-center font-bold text-slate-900">
+                                  ${p.newPrice}
+                                </td>
+
+                                <td className="py-4 text-center font-semibold text-slate-600">
+                                  {p.itemsSold}
+                                </td>
+
+                                <td className="py-4 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setRestockInvId(firstInv?.id);
+                                        setRestockItemName(p.name);
+                                        setRestockModalOpen(true);
+                                      }}
+                                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100 text-[11px] font-bold transition"
+                                    >
+                                      Restock
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleReserve(p, firstInv?.id, firstInv?.availableStock)}
+                                      disabled={isProc || firstInv?.availableStock <= 0}
+                                      className="px-3.5 py-1.5 rounded-lg bg-[#ff3b00] hover:bg-[#e03400] text-white text-[11px] font-bold transition shadow-sm shadow-[#ff3b00]/20 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                                    >
+                                      {isProc ? <Loader2 className="w-3 h-3 animate-spin" /> : "⚡ Lock 10m"}
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
-                            )
+                            );
                           })}
                         </tbody>
                       </table>
                     </div>
                   </div>
 
-                  {/* Realtime Event Stream & Audit Mesh Card */}
-                  <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 shadow-sm">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2.5">
-                        <Terminal className="w-5 h-5 text-indigo-400" />
-                        <h2 className="text-base font-bold text-white">Distributed Event Bus Stream (Redis Pub/Sub)</h2>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                        <span className="text-xs font-mono text-emerald-400 font-semibold">LISTENING ON :4003</span>
-                      </div>
+                </motion.div>
+              </AnimatePresence>
+            )}
+
+            {/* VIEW: CATALOG / PRODUCTS */}
+            {currentView === "Products" && (
+              <AnimatePresence mode="wait">
+                <motion.div key="prods" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-900">Product Catalog</h2>
+                      <p className="text-xs text-slate-400 font-medium">Distributed warehouse node allocation</p>
                     </div>
-                    <p className="text-xs text-slate-400 mb-4">Real-time domain event telemetry flowing across microservices mesh without database polling.</p>
-                    
-                    <div className="bg-[#0b0e14] border border-slate-800/80 rounded-xl p-3 font-mono text-xs space-y-2 max-h-48 overflow-y-auto">
+                    <button 
+                      onClick={() => setSimModalOpen(true)}
+                      className="px-4 py-2 rounded-2xl bg-[#ff3b00] text-white text-xs font-bold shadow-lg shadow-[#ff3b00]/20 flex items-center gap-2 hover:bg-[#e03400] transition"
+                    >
+                      <Zap className="w-4 h-4" /> Concurrency Test
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {retailProducts.map((p) => {
+                      const firstInv = p.inventories[0];
+                      const isProc = processing === firstInv?.id;
+
+                      return (
+                        <div key={p.id} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 flex flex-col justify-between">
+                          <div>
+                            <div className="w-full h-44 rounded-2xl bg-slate-100 overflow-hidden mb-4 border border-slate-100 relative">
+                              <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                              <span className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm text-slate-900 font-black text-xs px-2.5 py-1 rounded-full shadow-xs">
+                                ${p.newPrice}
+                              </span>
+                            </div>
+                            <h3 className="font-bold text-base text-slate-900 mb-1">{p.name}</h3>
+                            <p className="text-xs text-slate-500 line-clamp-2 mb-4">{p.description}</p>
+                          </div>
+
+                          <div className="space-y-3 pt-3 border-t border-slate-100">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-slate-400 font-semibold">Available Units</span>
+                              <span className="font-black text-slate-900">{p.availableStock} / {p.totalStock}</span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                              <div 
+                                style={{ width: `${(p.availableStock / Math.max(1, p.totalStock)) * 100}%` }}
+                                className="bg-[#ff3b00] h-full rounded-full transition-all"
+                              />
+                            </div>
+                            <button
+                              onClick={() => handleReserve(p, firstInv?.id, firstInv?.availableStock)}
+                              disabled={isProc || firstInv?.availableStock <= 0}
+                              className="w-full py-2.5 rounded-xl bg-[#14161a] hover:bg-black text-white text-xs font-bold transition flex items-center justify-center gap-2 disabled:opacity-40"
+                            >
+                              {isProc ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "⚡ Reserve Flash Lock"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            )}
+
+            {/* VIEW: RESERVATIONS */}
+            {currentView === "Reservations" && (
+              <AnimatePresence mode="wait">
+                <motion.div key="res" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-900">Active Flash Reservations</h2>
+                      <p className="text-xs text-slate-400 font-medium">10-minute sliding window lock management</p>
+                    </div>
+                    <button 
+                      onClick={() => setCurrentView("Dashboard")}
+                      className="px-4 py-2 rounded-2xl bg-white border border-slate-200 text-slate-800 text-xs font-bold shadow-xs hover:bg-slate-50 transition"
+                    >
+                      ← Back to Dashboard
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Left Table */}
+                    <div className="lg:col-span-2 bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
+                      <div className="text-base font-bold text-slate-900 mb-4">All Active Locks</div>
+                      
+                      {reservations.length === 0 ? (
+                        <div className="py-16 text-center text-slate-400 text-xs">
+                          <CalendarDays className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                          No active reservations found.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="border-b border-slate-100 text-slate-400 uppercase text-[10px] font-bold pb-2">
+                                <th className="pb-3">Product</th>
+                                <th className="pb-3 text-center">Status</th>
+                                <th className="pb-3 text-right">Expires</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {reservations.map((r) => {
+                                const isSel = displayRes?.id === r.id;
+                                return (
+                                  <tr 
+                                    key={r.id} 
+                                    onClick={() => setSelectedRes(r)}
+                                    className={`cursor-pointer transition-colors ${isSel ? "bg-orange-50/60 font-bold" : "hover:bg-slate-50"}`}
+                                  >
+                                    <td className="py-3">
+                                      <div className="font-bold text-slate-900">{r.productName || "Flash Product"}</div>
+                                      <div className="text-[10px] text-slate-400 font-mono">{r.id.slice(0, 14)}...</div>
+                                    </td>
+                                    <td className="py-3 text-center">
+                                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black ${
+                                        r.status === "CONFIRMED" ? "bg-emerald-50 text-emerald-600 border border-emerald-100" :
+                                        r.status === "ACTIVE" || r.status === "PENDING" ? "bg-[#ff3b00]/10 text-[#ff3b00] border border-[#ff3b00]/20" :
+                                        "bg-slate-100 text-slate-500"
+                                      }`}>
+                                        {r.status}
+                                      </span>
+                                    </td>
+                                    <td className="py-3 text-right font-bold text-slate-600">
+                                      {r.status === "ACTIVE" || r.status === "PENDING" ? (
+                                        <span className="text-[#ff3b00] flex items-center justify-end gap-1">
+                                          <Clock className="w-3 h-3" /> {r.id === displayRes?.id ? timeLeft : "Pending"}
+                                        </span>
+                                      ) : (
+                                        "—"
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right Details Card */}
+                    <div className="bg-[#14161a] text-white rounded-3xl p-6 shadow-xl flex flex-col justify-between">
+                      {displayRes ? (
+                        <>
+                          <div>
+                            <div className="text-xs font-semibold text-slate-400 mb-2">Reservation Inspector</div>
+                            <div className="text-lg font-black text-white mb-4">{displayRes.productName || "Selected Lock"}</div>
+
+                            <div className="space-y-3 bg-white/5 p-4 rounded-2xl text-xs font-medium text-slate-300 mb-6">
+                              <div className="flex justify-between border-b border-white/10 pb-2">
+                                <span className="text-slate-400">Lock ID</span>
+                                <span className="font-mono text-white text-[11px] truncate max-w-[120px]">{displayRes.id}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-white/10 pb-2">
+                                <span className="text-slate-400">Warehouse</span>
+                                <span className="text-white">{displayRes.warehouseName || "Delhi Distribution"}</span>
+                              </div>
+                              <div className="flex justify-between border-b border-white/10 pb-2">
+                                <span className="text-slate-400">Reserved At</span>
+                                <span className="text-white">{formatDateSafe(displayRes.createdAt)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-400">Expires At</span>
+                                <span className="text-white">{formatDateSafe(displayRes.expiresAt)}</span>
+                              </div>
+                            </div>
+
+                            {(displayRes.status === "ACTIVE" || displayRes.status === "PENDING") && (
+                              <div className="bg-[#ff3b00] text-white rounded-2xl p-5 mb-6 shadow-lg shadow-[#ff3b00]/30">
+                                <div className="text-[10px] font-black uppercase tracking-wider text-white/80 mb-1 flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" /> Sliding TTL Lock
+                                </div>
+                                <div className="text-4xl font-black font-mono tracking-tight">{timeLeft}</div>
+                                <div className="text-[10px] text-white/80 mt-1">Automatic zero-leak release after TTL.</div>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex gap-3">
+                            <button
+                              onClick={handleConfirm}
+                              disabled={processing === "confirm" || (displayRes.status !== "PENDING" && displayRes.status !== "ACTIVE")}
+                              className="flex-1 bg-white hover:bg-slate-100 text-slate-900 text-xs font-bold py-3 rounded-xl transition disabled:opacity-40"
+                            >
+                              {processing === "confirm" ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Confirm Order"}
+                            </button>
+                            <button
+                              onClick={handleRelease}
+                              disabled={processing === "release" || (displayRes.status !== "PENDING" && displayRes.status !== "ACTIVE")}
+                              className="flex-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-3 rounded-xl transition disabled:opacity-40"
+                            >
+                              {processing === "release" ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "Release Lock"}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center py-20 text-slate-500">
+                          <Tag className="w-8 h-8 mb-2 opacity-40" />
+                          <p className="text-xs">Select a reservation to inspect details</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            )}
+
+            {/* VIEW: REALTIME EVENT STREAM */}
+            {currentView === "Realtime" && (
+              <AnimatePresence mode="wait">
+                <motion.div key="stream" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h2 className="text-2xl font-black text-slate-900">Distributed Event Mesh</h2>
+                      <p className="text-xs text-slate-400 font-medium">WebSocket & Redis pub/sub live audit pipeline</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2.5 h-2.5 rounded-full ${wsConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+                      <span className="text-xs font-bold text-slate-600">{wsConnected ? "Gateway Connected (ws://4003)" : "Reconnecting..."}</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#14161a] text-slate-200 rounded-3xl p-6 shadow-xl font-mono text-xs overflow-hidden">
+                    <div className="flex justify-between items-center border-b border-white/10 pb-4 mb-4">
+                      <div className="flex items-center gap-2 text-white font-bold">
+                        <Terminal className="w-4 h-4 text-[#ff3b00]" />
+                        <span>Live Broadcast Stream</span>
+                      </div>
+                      <button 
+                        onClick={() => setEventLogs([])}
+                        className="text-[10px] text-slate-400 hover:text-white transition"
+                      >
+                        Clear Terminal
+                      </button>
+                    </div>
+
+                    <div className="space-y-3 min-h-[300px]">
                       {eventLogs.length === 0 ? (
-                        <div className="text-slate-500 py-3 text-center italic flex items-center justify-center gap-2">
-                          <Radio className="w-4 h-4 animate-spin text-slate-600" />
-                          <span>Waiting for live event packets... (Try reserving an item or running a stress test)</span>
+                        <div className="py-12 text-center text-slate-500">
+                          Listening for incoming microservice broadcast events...
                         </div>
                       ) : (
                         eventLogs.map((log) => (
-                          <div key={log.id} className="flex items-start gap-3 py-1 border-b border-slate-900/60 last:border-0">
-                            <span className="text-slate-500 text-[11px] shrink-0">{log.time}</span>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
-                              log.type.includes("CREATED") ? "bg-amber-500/20 text-amber-400 border border-amber-500/30" :
-                              log.type.includes("CONFIRMED") ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" :
-                              log.type.includes("EXPIRED") ? "bg-red-500/20 text-red-400 border border-red-500/30" :
-                              "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                            }`}>
-                              {log.type}
-                            </span>
-                            <span className="text-slate-300 truncate text-[11px]">{log.text}</span>
+                          <div key={log.id} className="flex items-start gap-3 py-1.5 border-b border-white/5">
+                            <span className="text-slate-500 text-[10px]">{log.time}</span>
+                            <span className="text-[#ff3b00] font-bold text-[10px]">[{log.type}]</span>
+                            <span className="text-slate-300 text-[11px] flex-1 truncate">{log.text}</span>
                           </div>
                         ))
                       )}
@@ -817,487 +1334,215 @@ export default function Store() {
               </AnimatePresence>
             )}
 
-            {currentView === "Reservations" && (
+            {/* VIEW: WAREHOUSES & ANALYTICS */}
+            {(currentView === "Warehouses" || currentView === "Analytics") && (
               <AnimatePresence mode="wait">
-                <motion.div key="reservations" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
-                  <div className="flex justify-between items-start md:items-center mb-8">
+                <motion.div key="wh" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
+                  <div className="flex justify-between items-center">
                     <div>
-                      <h1 className="text-3xl font-bold text-white mb-2">Reservations</h1>
-                      <p className="text-slate-400">Manage and track all inventory reservations in real-time.</p>
+                      <h2 className="text-2xl font-black text-slate-900">{currentView === "Warehouses" ? "Warehouse Nodes" : "Advanced Analytics"}</h2>
+                      <p className="text-xs text-slate-400 font-medium">Cluster inventory distribution</p>
                     </div>
-                    <button onClick={() => setCurrentView("Dashboard")} className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2 px-4 rounded-xl flex items-center gap-2 shadow-lg shadow-indigo-500/20 transition-all">
-                      <Plus className="w-4 h-4" /> New Reservation
-                    </button>
                   </div>
 
-                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-                    {[
-                      { title: "Total Reservations", val: stats.totalRes, color: "bg-indigo-600", icon: CalendarDays },
-                      { title: "Active Reservations", val: stats.activeRes, color: "bg-blue-600", icon: Clock },
-                      { title: "Expiring Soon", val: stats.expiringSoon, color: "bg-orange-500", icon: Timer },
-                      { title: "Confirmed", val: stats.confirmed, color: "bg-emerald-600", icon: CheckCircle },
-                      { title: "Expired / Released", val: stats.expiredOrReleased, color: "bg-red-500", icon: XCircle },
-                    ].map((s, i) => (
-                      <div key={i} className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-4 shadow-sm flex flex-col">
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className={`w-10 h-10 rounded-lg ${s.color} flex items-center justify-center shadow-lg`}>
-                            <s.icon className="w-5 h-5 text-white" />
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {stats.warehouses.map((wh: any) => (
+                      <div key={wh.name} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="w-10 h-10 rounded-xl bg-[#ff3b00]/10 text-[#ff3b00] flex items-center justify-center font-bold">
+                            <Truck className="w-5 h-5" />
                           </div>
-                          <div className="text-xs font-semibold text-slate-400 leading-tight">{s.title}</div>
+                          <div>
+                            <div className="font-bold text-slate-900">{wh.name}</div>
+                            <div className="text-[11px] text-slate-400">{wh.location}</div>
+                          </div>
                         </div>
-                        <div className="text-2xl font-bold text-white mb-1">
-                          {loading && reservations.length === 0 ? <span className="inline-block w-8 h-6 bg-slate-800 animate-pulse rounded"></span> : s.val}
+
+                        <div className="space-y-2 text-xs font-semibold text-slate-600">
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Total Stock</span>
+                            <span className="text-slate-900">{wh.totalStock}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Reserved Locks</span>
+                            <span className="text-[#ff3b00]">{wh.reservedStock}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Available</span>
+                            <span className="text-emerald-600">{wh.availableStock}</span>
+                          </div>
                         </div>
                       </div>
                     ))}
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[700px]">
-                    <div className="lg:col-span-2 bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 shadow-sm flex flex-col h-full overflow-hidden">
-                      <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
-                        <h2 className="text-lg font-bold text-white">All Reservations</h2>
-                      </div>
-                      <div className="flex-1 overflow-y-auto">
-                        {loading && reservations.length === 0 ? (
-                          <div className="space-y-4 p-4">
-                            {[1, 2, 3, 4, 5].map(k => (
-                              <div key={k} className="flex items-center gap-4 animate-pulse">
-                                <div className="w-8 h-8 rounded-md bg-slate-800" />
-                                <div className="h-4 bg-slate-800 rounded w-32" />
-                                <div className="h-4 bg-slate-800 rounded w-24 ml-auto" />
-                                <div className="h-4 bg-slate-800 rounded w-16" />
-                              </div>
-                            ))}
-                          </div>
-                        ) : reservations.length === 0 ? (
-                           <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2">
-                              <CalendarDays className="w-10 h-10 opacity-50" />
-                              <p>No reservations found in database.</p>
-                           </div>
-                        ) : (
-                        <table className="w-full text-left border-collapse">
-                          <thead>
-                            <tr className="border-b border-slate-800">
-                              <th className="pb-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Product</th>
-                              <th className="pb-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Warehouse</th>
-                              <th className="pb-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-center">Qty</th>
-                              <th className="pb-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-center">Status</th>
-                              <th className="pb-3 text-[10px] font-semibold text-slate-500 uppercase tracking-wider text-right">Expires In</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/40">
-                            {reservations.map((res) => {
-                              const isSelected = displayRes?.id === res.id;
-                              return (
-                                <tr key={res.id} onClick={() => setSelectedRes(res)} className={`cursor-pointer transition-colors ${isSelected ? 'bg-indigo-900/10' : 'hover:bg-slate-800/30'}`}>
-                                  <td className="py-4">
-                                    <div className="flex items-center gap-3">
-                                      <div className="w-8 h-8 rounded-md bg-slate-800 overflow-hidden flex-shrink-0">
-                                        {res.image && <img src={res.image} alt={res.productName} className="w-full h-full object-cover" />}
-                                      </div>
-                                      <div className={`text-sm font-semibold truncate max-w-[120px] ${isSelected ? 'text-indigo-400' : 'text-slate-200'}`}>{res.productName}</div>
-                                    </div>
-                                  </td>
-                                  <td className="py-4 text-xs text-slate-400">{res.warehouseName}</td>
-                                  <td className="py-4 text-center text-xs font-semibold text-white">{res.quantity}</td>
-                                  <td className="py-4 text-center">
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold tracking-wider border ${
-                                      res.status === 'CONFIRMED' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
-                                      res.status === 'ACTIVE' || res.status === 'PENDING' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
-                                      res.status === 'EXPIRED' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                                      'bg-slate-500/10 text-blue-400 border-blue-500/20'
-                                    }`}>
-                                      {res.status}
-                                    </span>
-                                  </td>
-                                  <td className="py-4 text-right text-xs">
-                                     {res.status === 'ACTIVE' || res.status === 'PENDING' ? (
-                                        <div className="text-amber-500 font-bold flex items-center justify-end gap-1"><Clock className="w-3 h-3" /> {res.id === displayRes?.id ? timeLeft : 'Pending'}</div>
-                                     ) : (
-                                        <div className="text-slate-600 font-bold">—</div>
-                                     )}
-                                  </td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 shadow-sm flex flex-col h-full overflow-y-auto">
-                      <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-lg font-bold text-white">Reservation Details</h2>
-                      </div>
-
-                      {displayRes ? (
-                        <>
-                          <div className="flex items-center gap-4 mb-6">
-                            <div className="w-14 h-14 bg-slate-800 rounded-xl overflow-hidden flex-shrink-0">
-                               {displayRes.image && <img src={displayRes.image} alt={displayRes.productName} className="w-full h-full object-cover" />}
-                            </div>
-                            <div className="flex-1">
-                               <div className="text-sm font-bold text-white mb-1">{displayRes.productName}</div>
-                               <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold tracking-wider border ${
-                                  displayRes.status === 'CONFIRMED' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
-                                  displayRes.status === 'ACTIVE' || displayRes.status === 'PENDING' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
-                                  'bg-red-500/10 text-red-500 border-red-500/20'
-                                }`}>
-                                  {displayRes.status}
-                                </span>
-                            </div>
-                          </div>
-
-                          <div className="space-y-4 text-xs mb-8 bg-[#11151d] p-4 rounded-xl border border-slate-800">
-                             <div className="flex justify-between border-b border-slate-800/50 pb-2">
-                               <span className="text-slate-500 flex items-center gap-2"><Package className="w-3.5 h-3.5" /> Reservation ID</span>
-                               <span className="text-slate-300 font-mono truncate max-w-[120px]">{displayRes.id}</span>
-                             </div>
-                             <div className="flex justify-between border-b border-slate-800/50 pb-2">
-                               <span className="text-slate-500 flex items-center gap-2"><Building2 className="w-3.5 h-3.5" /> Warehouse</span>
-                               <span className="text-slate-300">{displayRes.warehouseName}</span>
-                             </div>
-                             <div className="flex justify-between border-b border-slate-800/50 pb-2">
-                               <span className="text-slate-500 flex items-center gap-2"><Activity className="w-3.5 h-3.5" /> Quantity</span>
-                               <span className="text-slate-300">{displayRes.quantity} Units</span>
-                             </div>
-                             <div className="flex justify-between border-b border-slate-800/50 pb-2">
-                               <span className="text-slate-500 flex items-center gap-2"><Calendar className="w-3.5 h-3.5" /> Reserved At</span>
-                               <span className="text-slate-300">{formatDateSafe(displayRes.createdAt)}</span>
-                             </div>
-                             <div className="flex justify-between">
-                               <span className="text-slate-500 flex items-center gap-2"><Clock className="w-3.5 h-3.5" /> Expires At</span>
-                               <span className="text-slate-300">{formatDateSafe(displayRes.expiresAt)}</span>
-                             </div>
-                          </div>
-
-                          {(displayRes.status === 'ACTIVE' || displayRes.status === 'PENDING') && (
-                            <div className="bg-[#1e1915] border border-amber-900/30 rounded-xl p-5 mb-8 relative overflow-hidden">
-                               <div className="absolute top-0 left-0 h-1 bg-amber-500 transition-all duration-1000 ease-linear" style={{ width: `${timerPercent}%` }} />
-                               <div className="text-[10px] text-amber-500/80 font-bold uppercase tracking-wider mb-2 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Expires In</div>
-                               <div className="flex items-end gap-2 mb-2">
-                                  <div className="text-4xl font-bold text-amber-500 font-mono tracking-tighter">
-                                    {timeLeft.split(':')[0] || '00'}
-                                  </div>
-                                  <div className="text-sm text-amber-500/50 font-bold mb-1">min</div>
-                                  <div className="text-4xl font-bold text-amber-500/50 pb-1">:</div>
-                                  <div className="text-4xl font-bold text-amber-500 font-mono tracking-tighter">
-                                    {timeLeft.split(':')[1] || '00'}
-                                  </div>
-                                  <div className="text-sm text-amber-500/50 font-bold mb-1">sec</div>
-                               </div>
-                               <div className="text-[10px] text-amber-500/60 font-medium">Reservation will be automatically released after expiry.</div>
-                            </div>
-                          )}
-
-                          <div className="mt-auto space-y-3">
-                             <div className="flex gap-3">
-                                <button 
-                                  onClick={handleConfirm}
-                                  disabled={processing === "confirm" || displayRes.status !== "PENDING" && displayRes.status !== "ACTIVE"}
-                                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex justify-center items-center"
-                                >
-                                  {processing === "confirm" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm Reservation"}
-                                </button>
-                                <button 
-                                  onClick={handleRelease}
-                                  disabled={processing === "release" || displayRes.status !== "PENDING" && displayRes.status !== "ACTIVE"}
-                                  className="flex-1 bg-transparent border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs font-bold py-3 rounded-xl transition disabled:opacity-50 flex justify-center items-center"
-                                >
-                                  {processing === "release" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Release Reservation"}
-                                </button>
-                             </div>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center">
-                          <Package className="w-12 h-12 text-slate-700 mb-4" />
-                          <p className="text-slate-400 text-sm">Select a reservation to view details</p>
-                        </div>
-                      )}
-                    </div>
                   </div>
                 </motion.div>
               </AnimatePresence>
-            )}
-
-            {currentView === "Products" && (
-              <motion.div key="products" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                 <h1 className="text-3xl font-bold text-white mb-6">Product Catalog</h1>
-                 <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    {tableData.map(p => (
-                       <div key={p.id} className="bg-[#161b22] border border-slate-800/60 rounded-2xl overflow-hidden hover:border-indigo-500/50 transition">
-                          <div className="h-48 bg-slate-800 relative">
-                             {p.image && <img src={p.image} alt={p.name} className="w-full h-full object-cover" />}
-                             <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-xs font-bold text-white border border-white/10">
-                                {p.available} In Stock
-                             </div>
-                          </div>
-                          <div className="p-5">
-                             <h3 className="font-bold text-white text-lg mb-1">{p.name}</h3>
-                             <p className="text-xs text-slate-400 line-clamp-2 mb-4">{p.description}</p>
-                             <div className="flex justify-between items-center pt-4 border-t border-slate-800">
-                                <div className="text-xs">
-                                   <span className="text-slate-500 block">Total Capacity</span>
-                                   <span className="font-bold text-slate-300">{p.totalStock} Units</span>
-                                </div>
-                                <div className="text-xs text-right">
-                                   <span className="text-slate-500 block">Currently Reserved</span>
-                                   <span className="font-bold text-red-400">{p.reserved} Units</span>
-                                </div>
-                             </div>
-                             <div className="flex gap-2 mt-4">
-                                <button 
-                                  onClick={() => p.bestInv && handleReserve(p, p.bestInv.id, p.bestInv.availableStock)}
-                                  disabled={p.available <= 0 || processing === p.bestInv?.id}
-                                  className="flex-1 py-2 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg text-xs font-bold transition disabled:opacity-50 border border-indigo-500/30 flex items-center justify-center gap-1.5"
-                                >
-                                  {processing === p.bestInv?.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Reserve 1"}
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (p.bestInv) {
-                                      setRestockInvId(p.bestInv.id);
-                                      setRestockItemName(`${p.name} (${p.bestInv.warehouse.name})`);
-                                      setRestockModalOpen(true);
-                                    }
-                                  }}
-                                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition border border-slate-700 flex items-center justify-center"
-                                  title="Restock units"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                          </div>
-                       </div>
-                    ))}
-                 </div>
-              </motion.div>
-            )}
-
-            {currentView === "Warehouses" && (
-              <motion.div key="warehouses" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-                 <h1 className="text-3xl font-bold text-white mb-6">Fulfillment Centers</h1>
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {stats.warehouses.map(w => (
-                       <div key={w.id} className="bg-[#161b22] border border-slate-800/60 rounded-2xl p-6 shadow-sm flex items-start gap-6">
-                          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
-                             <Building2 className="w-8 h-8 text-emerald-400" />
-                          </div>
-                          <div className="flex-1">
-                             <h3 className="text-xl font-bold text-white mb-1">{w.name}</h3>
-                             <p className="text-sm text-slate-400 flex items-center gap-1 mb-4"><MapPin className="w-4 h-4" /> {w.location}</p>
-                             
-                             <div className="grid grid-cols-3 gap-4 p-4 bg-[#11151d] rounded-xl border border-slate-800">
-                                <div>
-                                   <div className="text-xs text-slate-500 mb-1">Total Stock</div>
-                                   <div className="font-bold text-white">{w.totalStock}</div>
-                                </div>
-                                <div>
-                                   <div className="text-xs text-slate-500 mb-1">Available</div>
-                                   <div className="font-bold text-emerald-400">{w.availableStock}</div>
-                                </div>
-                                <div>
-                                   <div className="text-xs text-slate-500 mb-1">Reserved</div>
-                                   <div className="font-bold text-amber-400">{w.reservedStock}</div>
-                                </div>
-                             </div>
-                          </div>
-                       </div>
-                    ))}
-                 </div>
-              </motion.div>
-            )}
-
-            {(currentView === "Analytics" || currentView === "Reports" || currentView === "Alerts" || currentView === "Settings") && (
-              <motion.div key="other" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center h-[60vh] text-center">
-                 <TrendingUp className="w-20 h-20 text-indigo-500/30 mb-6" />
-                 <h2 className="text-3xl font-bold text-white mb-3">{currentView} Module</h2>
-                 <p className="text-slate-400 max-w-md">This module integrates perfectly with the existing live data. Your inventory utilization is currently at {stats.globalStock ? Math.round((stats.globalReserved / stats.globalStock) * 100) : 0}%.</p>
-                 <button onClick={() => setCurrentView("Dashboard")} className="mt-8 px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition">Back to Dashboard</button>
-              </motion.div>
             )}
 
           </div>
         </div>
       </main>
 
-      {/* FLASH-SALE CONCURRENCY SIMULATION MODAL */}
+      {/* CONCURRENCY SIMULATION MODAL */}
       <AnimatePresence>
         {simModalOpen && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-[#161b22] border border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5"
+              className="bg-[#14161a] text-white rounded-3xl p-7 max-w-lg w-full shadow-2xl border border-white/10 space-y-5"
             >
-              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
-                    <Zap className="w-5 h-5 text-amber-400" />
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <div className="w-9 h-9 rounded-xl bg-[#ff3b00] flex items-center justify-center text-white">
+                    <Zap className="w-5 h-5" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold text-white">Flash-Sale Concurrency Simulator</h2>
-                    <p className="text-xs text-slate-400">Test high-concurrency race condition prevention</p>
+                    <h3 className="font-black text-base text-white">Flash-Sale Concurrency Simulator</h3>
+                    <p className="text-[11px] text-slate-400">Simulate simultaneous parallel reservation bursts</p>
                   </div>
                 </div>
-                <button onClick={() => setSimModalOpen(false)} className="text-slate-500 hover:text-white">
+                <button onClick={() => setSimModalOpen(false)} className="text-slate-400 hover:text-white transition">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
               <div className="space-y-4 text-xs">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Target Product Inventory</label>
+                  <label className="block text-slate-400 font-bold mb-1.5">Target Product Node</label>
                   <select 
                     value={simInvId} 
-                    onChange={(e) => setSimInvId(e.target.value)}
-                    className="w-full bg-[#0b0e14] border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                    onChange={e => setSimInvId(e.target.value)}
+                    className="w-full bg-white/10 border border-white/15 rounded-xl px-3.5 py-2.5 text-white font-bold focus:outline-none"
                   >
-                    {products.flatMap(p => (p.inventories || []).map(inv => (
-                      <option key={inv.id} value={inv.id}>
-                        {p.name} - {inv.warehouse.name} ({inv.availableStock} Available / {inv.totalStock} Total)
-                      </option>
-                    )))}
+                    <option value="inv_1" className="bg-slate-900">iPhone 15 Pro (Delhi Node)</option>
+                    <option value="inv_2" className="bg-slate-900">iPhone 15 Pro (Mumbai Node)</option>
+                    <option value="inv_3" className="bg-slate-900">MacBook Air M3 (Bengaluru Node)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Simultaneous Parallel Requests</label>
+                  <label className="block text-slate-400 font-bold mb-1.5">Parallel Concurrent Bursts</label>
                   <div className="flex gap-2">
                     {[10, 20, 50, 100].map(cnt => (
-                      <button 
+                      <button
                         key={cnt}
                         type="button"
                         onClick={() => setSimCount(cnt)}
-                        className={`flex-1 py-2 rounded-lg font-bold text-xs border transition ${
-                          simCount === cnt ? "bg-amber-500/20 border-amber-500 text-amber-300" : "bg-slate-800/40 border-slate-700 text-slate-400 hover:text-slate-200"
+                        className={`flex-1 py-2 rounded-xl font-bold transition ${
+                          simCount === cnt 
+                            ? "bg-[#ff3b00] text-white" 
+                            : "bg-white/10 text-slate-300 hover:bg-white/20"
                         }`}
                       >
-                        {cnt} Users
+                        {cnt} reqs
                       </button>
                     ))}
                   </div>
                 </div>
 
-                <div className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800 text-[11px] text-slate-400">
-                  ⚡ All {simCount} requests will hit PostgreSQL row locks simultaneously via <code>Promise.all</code>. The engine guarantees zero overselling.
-                </div>
-
                 {simResult && (
-                  <div className="p-4 bg-[#0d1117] rounded-xl border border-slate-800 space-y-3">
-                    <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      <span>Zero Oversell Guaranteed (PostgreSQL Atomic Row Lock)</span>
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2">
+                    <div className="text-[11px] font-black text-emerald-400 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4" /> Zero-Oversell Guarantee Verified
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                      <div className="p-2 bg-slate-900 rounded-lg">
-                        <div className="text-slate-500 text-[10px]">Granted (201)</div>
-                        <div className="text-base font-bold text-emerald-400">{simResult.summary?.granted}</div>
+                    <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                      <div className="bg-black/40 p-2 rounded-xl">
+                        <div className="text-[10px] text-slate-400 font-bold">Granted</div>
+                        <div className="text-lg font-black text-emerald-400">{simResult.summary?.granted}</div>
                       </div>
-                      <div className="p-2 bg-slate-900 rounded-lg">
-                        <div className="text-slate-500 text-[10px]">Conflict (409)</div>
-                        <div className="text-base font-bold text-amber-400">{simResult.summary?.rejectedConflicts}</div>
+                      <div className="bg-black/40 p-2 rounded-xl">
+                        <div className="text-[10px] text-slate-400 font-bold">Rejected</div>
+                        <div className="text-lg font-black text-amber-400">{simResult.summary?.rejectedConflicts}</div>
                       </div>
-                      <div className="p-2 bg-slate-900 rounded-lg">
-                        <div className="text-slate-500 text-[10px]">Total Time</div>
-                        <div className="text-base font-bold text-indigo-400">{simResult.summary?.totalDurationMs}ms</div>
+                      <div className="bg-black/40 p-2 rounded-xl">
+                        <div className="text-[10px] text-slate-400 font-bold">Duration</div>
+                        <div className="text-lg font-black text-white">{simResult.summary?.durationMs}ms</div>
                       </div>
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setSimModalOpen(false)}
-                  className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRunSimulation}
-                  disabled={simLoading}
-                  className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
-                >
-                  {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Zap className="w-4 h-4" /> Run Burst Test</>}
-                </button>
-              </div>
+              <button
+                onClick={handleRunSimulation}
+                disabled={simLoading}
+                className="w-full bg-[#ff3b00] hover:bg-[#e03400] text-white font-black py-3 rounded-2xl transition shadow-lg shadow-[#ff3b00]/30 flex items-center justify-center gap-2"
+              >
+                {simLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : `⚡ Fire ${simCount} Parallel Requests`}
+              </button>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      {/* QUICK RESTOCK MODAL */}
+      {/* RESTOCK MODAL */}
       <AnimatePresence>
         {restockModalOpen && (
-          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <motion.div
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-[#161b22] border border-slate-700 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4"
+              className="bg-white rounded-3xl p-7 max-w-sm w-full shadow-2xl border border-slate-200 space-y-4 text-slate-900"
             >
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h3 className="font-bold text-white text-base">Restock Inventory</h3>
-                <button onClick={() => setRestockModalOpen(false)} className="text-slate-500 hover:text-white">
-                  <X className="w-4 h-4" />
+              <div className="flex justify-between items-center">
+                <h3 className="font-black text-base text-slate-900">Restock Warehouse Node</h3>
+                <button onClick={() => setRestockModalOpen(false)} className="text-slate-400 hover:text-slate-900">
+                  <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <p className="text-xs text-slate-400 truncate">Product: <span className="font-bold text-slate-200">{restockItemName}</span></p>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Add Units to Total Stock</label>
-                <input 
-                  type="number" 
-                  min="1" 
-                  max="100" 
-                  value={restockQty} 
-                  onChange={(e) => setRestockQty(Number(e.target.value))}
-                  className="w-full bg-[#0b0e14] border border-slate-700 rounded-lg p-2.5 text-sm text-white font-bold"
-                />
+              <div className="text-xs text-slate-500 font-medium">
+                Replenish inventory for <span className="font-bold text-slate-900">{restockItemName}</span>.
               </div>
 
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setRestockModalOpen(false)}
-                  className="flex-1 py-2 bg-slate-800 text-slate-300 rounded-lg text-xs font-semibold"
+              <div className="flex items-center gap-3 py-2">
+                <button 
+                  onClick={() => setRestockQty(Math.max(1, restockQty - 1))}
+                  className="w-10 h-10 rounded-xl bg-slate-100 font-black text-base hover:bg-slate-200 transition"
                 >
-                  Cancel
+                  -
                 </button>
-                <button
-                  type="button"
-                  onClick={handleRestockSubmit}
-                  disabled={restockLoading}
-                  className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5"
+                <div className="flex-1 text-center font-black text-xl text-slate-900">
+                  +{restockQty}
+                </div>
+                <button 
+                  onClick={() => setRestockQty(restockQty + 5)}
+                  className="w-10 h-10 rounded-xl bg-slate-100 font-black text-base hover:bg-slate-200 transition"
                 >
-                  {restockLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Confirm Restock"}
+                  +
                 </button>
               </div>
+
+              <button
+                onClick={handleRestockSubmit}
+                disabled={restockLoading}
+                className="w-full bg-[#14161a] hover:bg-black text-white text-xs font-bold py-3 rounded-2xl transition flex items-center justify-center gap-2"
+              >
+                {restockLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm Restock & Broadcast"}
+              </button>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
+      {/* GLOBAL TOAST */}
       <AnimatePresence>
         {toast && (
           <motion.div
-            key={toast.id}
-            initial={{ opacity: 0, y: 10, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
-            className="fixed bottom-6 right-6 p-4 rounded-xl shadow-lg border bg-[#1e2532] flex items-center gap-3 max-w-sm z-50 shadow-black/50"
-            style={{ borderColor: toast.isError ? '#ef4444' : '#3b82f6' }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl shadow-2xl text-xs font-bold flex items-center gap-2.5 border ${
+              toast.isError 
+                ? "bg-red-600 text-white border-red-500" 
+                : "bg-[#14161a] text-white border-white/10"
+            }`}
           >
-            {toast.isError ? <AlertCircle className="w-5 h-5 text-red-500 shrink-0" /> : <CheckCircle2 className="w-5 h-5 text-blue-500 shrink-0" />}
-            <p className="font-medium text-sm text-slate-200">{toast.msg}</p>
-            <button onClick={() => setToast(null)} className="ml-auto text-slate-500 hover:text-slate-300 transition"><X className="w-4 h-4" /></button>
+            {toast.isError ? <AlertCircle className="w-4 h-4 text-white" /> : <Sparkles className="w-4 h-4 text-[#ff3b00]" />}
+            <span>{toast.msg}</span>
           </motion.div>
         )}
       </AnimatePresence>
