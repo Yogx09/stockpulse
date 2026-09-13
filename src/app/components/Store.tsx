@@ -160,9 +160,6 @@ export default function Store() {
   }, []);
 
   const fetchData = useCallback(async (silent = false) => {
-    if (!silent && products.length === 0 && reservations.length === 0) {
-      setLoading(true);
-    }
     try {
       const [prodRes, resRes] = await Promise.all([
         fetch("/api/products"),
@@ -178,7 +175,10 @@ export default function Store() {
         setReservations(resData);
         try { localStorage.setItem("stockpulse_reservations_cache", JSON.stringify(resData)); } catch {}
         if (resData.length > 0) {
-          setSelectedRes(prev => prev ? (resData.find((r: Reservation) => r.id === prev.id) || resData[0]) : resData[0]);
+          setSelectedRes(prev => {
+            if (!prev) return resData[0];
+            return resData.find((r: Reservation) => r.id === prev.id) || resData[0];
+          });
         }
       }
     } catch {
@@ -186,7 +186,7 @@ export default function Store() {
     } finally {
       setLoading(false);
     }
-  }, [products.length, reservations.length, selectedRes]);
+  }, []);
 
   // WebSocket Live Real-time Connection
   useEffect(() => {
@@ -296,17 +296,25 @@ export default function Store() {
   };
 
   // Global countdown timer for active reservation
+  const targetRes = selectedRes || activeReservation || reservations[0];
+  const targetExpiry = targetRes?.expiresAt;
+  const targetStatus = targetRes?.status;
+  const targetId = targetRes?.id;
+
   useEffect(() => {
-    const target = selectedRes || activeReservation || reservations[0];
-    if (!target || !target.expiresAt) return;
+    if (!targetExpiry) {
+      setTimeLeft("00:00");
+      setTimerPercent(0);
+      return;
+    }
     
     const TOTAL_SECONDS = 600;
     
     const updateTimer = () => {
-      const expiry = new Date(target.expiresAt);
+      const expiry = new Date(targetExpiry);
       const now = new Date();
       
-      if (isNaN(expiry.getTime()) || expiry <= now || target.status === "EXPIRED" || target.status === "CONFIRMED" || target.status === "RELEASED") {
+      if (isNaN(expiry.getTime()) || expiry <= now || targetStatus === "EXPIRED" || targetStatus === "CONFIRMED" || targetStatus === "RELEASED") {
         setTimeLeft("00:00");
         setTimerPercent(0);
       } else {
@@ -321,7 +329,7 @@ export default function Store() {
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
-  }, [activeReservation, selectedRes, reservations]);
+  }, [targetId, targetExpiry, targetStatus]);
 
   const handleReserve = async (product: Product, inventoryId: string, maxStock: number) => {
     if (maxStock <= 0) return;
