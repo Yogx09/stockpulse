@@ -40,6 +40,17 @@ type Reservation = {
   image?: string;
 };
 
+const formatDateSafe = (dateStr?: string | Date | null) => {
+  if (!dateStr) return "Just now";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "Just now";
+    return format(d, "MMM dd, yyyy hh:mm a");
+  } catch {
+    return "Just now";
+  }
+};
+
 export default function Store() {
   const [currentView, setCurrentView] = useState<"Dashboard" | "Products" | "Reservations" | "Warehouses" | "Analytics" | "Reports" | "Alerts" | "Settings">("Dashboard");
   const [products, setProducts] = useState<Product[]>([]);
@@ -234,26 +245,28 @@ export default function Store() {
   // Global timer for the active real reservation (or selected reservation)
   useEffect(() => {
     const target = selectedRes || activeReservation || reservations[0];
-    if (!target) return;
+    if (!target || !target.expiresAt) return;
     
     const TOTAL_SECONDS = 600;
     
-    const interval = setInterval(() => {
+    const updateTimer = () => {
       const expiry = new Date(target.expiresAt);
       const now = new Date();
       
-      if (expiry <= now || target.status === "EXPIRED" || target.status === "CONFIRMED" || target.status === "RELEASED") {
+      if (isNaN(expiry.getTime()) || expiry <= now || target.status === "EXPIRED" || target.status === "CONFIRMED" || target.status === "RELEASED") {
         setTimeLeft("00:00");
         setTimerPercent(0);
-        clearInterval(interval);
       } else {
-        const diff = differenceInSeconds(expiry, now);
+        const diff = Math.max(0, differenceInSeconds(expiry, now));
         const m = Math.floor(diff / 60).toString().padStart(2, '0');
         const s = (diff % 60).toString().padStart(2, '0');
         setTimeLeft(`${m}:${s}`);
         setTimerPercent(Math.max(0, Math.min(100, (diff / TOTAL_SECONDS) * 100)));
       }
-    }, 1000);
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
   }, [activeReservation, selectedRes, reservations]);
 
@@ -380,7 +393,13 @@ export default function Store() {
 
     const nowTime = Date.now();
     const activeRes = reservations.filter(r => r.status === 'ACTIVE' || r.status === 'PENDING').length;
-    const expiringSoon = reservations.filter(r => (r.status === 'ACTIVE' || r.status === 'PENDING') && new Date(r.expiresAt).getTime() - nowTime < 300000).length;
+    const expiringSoon = reservations.filter(r => {
+      if (r.status !== 'ACTIVE' && r.status !== 'PENDING') return false;
+      const exp = new Date(r.expiresAt).getTime();
+      if (isNaN(exp)) return false;
+      const diff = exp - nowTime;
+      return diff > 0 && diff <= 300000;
+    }).length;
     const confirmed = reservations.filter(r => r.status === 'CONFIRMED').length;
     const expiredOrReleased = reservations.filter(r => r.status === 'EXPIRED' || r.status === 'RELEASED').length;
 
@@ -945,11 +964,11 @@ export default function Store() {
                              </div>
                              <div className="flex justify-between border-b border-slate-800/50 pb-2">
                                <span className="text-slate-500 flex items-center gap-2"><Calendar className="w-3.5 h-3.5" /> Reserved At</span>
-                               <span className="text-slate-300">{format(new Date(displayRes.createdAt), "MMM dd, yyyy hh:mm a")}</span>
+                               <span className="text-slate-300">{formatDateSafe(displayRes.createdAt)}</span>
                              </div>
                              <div className="flex justify-between">
                                <span className="text-slate-500 flex items-center gap-2"><Clock className="w-3.5 h-3.5" /> Expires At</span>
-                               <span className="text-slate-300">{format(new Date(displayRes.expiresAt), "MMM dd, yyyy hh:mm a")}</span>
+                               <span className="text-slate-300">{formatDateSafe(displayRes.expiresAt)}</span>
                              </div>
                           </div>
 
